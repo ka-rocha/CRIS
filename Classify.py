@@ -23,8 +23,8 @@ class Classify():
         for i, cl in enumerate(self.class_data):
             iter_time = time.time()
 
-            #line = LinearNDInterpolator( self.input_data[0::5], cl[0::5])
-            line = LinearNDInterpolator( self.input_data, cl )
+            line = LinearNDInterpolator( self.input_data[0::5], cl[0::5])
+            #line = LinearNDInterpolator( self.input_data, cl )
             self.interpolators.append( line )
 
             time_print = time.time()-start_time
