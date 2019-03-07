@@ -22,7 +22,7 @@ class TabelData():
 
         self._files_ = table_paths
         self.class_col = class_col # assumed to be one column name + string
-
+        
         # read in all data files and add to df_list
         print( "Reading in data from %i file(s)."%(len(table_paths)) )
         for num, path in enumerate(table_paths):
@@ -54,14 +54,13 @@ class TabelData():
 
         # ---- regression variables ----
 
-
         # mapping dictionary - forward & backward
         self.class_id_mapping = dict()
         for i in range(self.num_classes):
             self.class_id_mapping[i] = self.class_names[i]
             self.class_id_mapping[ self.class_names[i] ] = i
 
-        # class column replaced with class_id
+        # single column of classes replaced with class_id
         self.all_classes = self.full_data[class_col].values
         self.classes_to_ids = []
         for cl in self.all_classes:
@@ -114,8 +113,12 @@ class TabelData():
             return np.array(self.output_)
 
 
-    def get_classes(self,):
+    def get_class_ids(self,):
         return self.class_ids
+
+    def get_classes_to_ids(self,):
+        """ Dictionary of classes to their respective IDs."""
+        return self.classes_to_ids
 
     def get_class_data( self,):
         # Return list of N arrays. Each array corresponds to one class and
@@ -167,7 +170,7 @@ class TabelData():
                       5:colors[5] }
         ## MAKE LEGEND
         legend_elements = []
-        for i, name in enumerate(table_object.class_names):
+        for i, name in enumerate(self.class_names):
             legend_elements.append( Line2D([], [], marker='s', color=color_dict[i],
                                            label=name, linestyle='None', markersize=8)  )
         #--------------

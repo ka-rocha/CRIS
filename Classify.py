@@ -7,18 +7,21 @@ from scipy.interpolate import LinearNDInterpolator
 import time
 
 
-class Classify():
+class Classifier():
 
-    def __init__(self, table_data, method = "linear"):
+    def __init__( self, table_data ):
 
-        self.method = method
         self.table_data = table_data
 
-        self.classes = table_data.get_classes()
+        self.class_ids = table_data.get_class_ids()
+        self.classes_to_ids = table_data.get_classes_to_ids()
         self.class_data = table_data.get_class_data()
         self.input_data = table_data.get_input_data()
+
         self.interpolators = []
 
+
+    def linear_ND_interpolator(self):
         start_time = time.time()
         for i, cl in enumerate(self.class_data):
             iter_time = time.time()
@@ -29,9 +32,9 @@ class Classify():
 
             time_print = time.time()-start_time
             if i == 0:
-                len_classes = len(self.classes)
+                len_classes = len(self.class_ids)
                 print( "Time to fit %s classifiers ~ %.3f\n"%(len_classes, time_print*len_classes) )
-            print("LinearNDInterpolator class %s -- time: %.3f"%(i,time_print) )
+            print("LinearNDInterpolator class %s -- current time: %.3f"%(i,time_print) )
 
         print("Done")
 
@@ -41,8 +44,9 @@ class Classify():
         # N rows = num test points, M columns = num classes
 
         probs = []
-        classes = self.table_data.get_classes()
-        class_data = self.table_data.get_class_data()
+
+        if not self.interpolators: # if empty
+            raise Exception("\n\nNo trained interpolators exist.")
 
         for interp in self.interpolators:
             # for LinearNDInterpolator - each interpolator is on a different class
@@ -56,16 +60,22 @@ class Classify():
         else:
             return np.max(probs, axis = 1)
 
-    def return_class_predictions(self, test_input):
+
+    def return_class_predictions(self, test_input, return_probs = False):
 
         probs = self.return_probs(test_input, all_probs = True)
 
         pred_class_ids = np.argmax( probs, axis = 1 )
-        return pred_class_ids
+
+        if return_probs:
+            return pred_class_ids, probs
+        else:
+            return pred_class_ids
 
 
     def get_rnd_test_inputs(self, N):
         # produce randomly sampled 'test' inputs inside domain of input_data
+        # ++ need ability to specify rng of axis
 
         num_axis = len(self.input_data[0])
 
