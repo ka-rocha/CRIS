@@ -11,7 +11,6 @@ class TabelData():
 
     For managing data sets used for classification and regression.
     Required data object for Classifier and Regressor.
-
     """
 
     def __init__(self, table_paths, input_cols, output_cols, class_col, ignore_lines = 0):
@@ -22,7 +21,7 @@ class TabelData():
 
         self._files_ = table_paths
         self.class_col = class_col # assumed to be one column name + string
-        
+
         # read in all data files and add to df_list
         print( "Reading in data from %i file(s)."%(len(table_paths)) )
         for num, path in enumerate(table_paths):
@@ -43,7 +42,7 @@ class TabelData():
         self.input_  = self.full_data[input_cols]
         self.output_ = self.full_data[output_cols]
 
-        # ---- classification variables ----
+        # --------- classification variables ---------
         self.class_names = np.unique( self.full_data[class_col] )
         self.num_classes = len(self.class_names)
         self.class_ids = np.arange( 0, self.num_classes, 1, dtype=int)
@@ -51,8 +50,6 @@ class TabelData():
         print("Input columns: %s"%(len(input_cols)) )
         print("Output columns: %s"%(len(output_cols)) )
         print("Unique classes found in %s: %s"%(class_col, self.num_classes) )
-
-        # ---- regression variables ----
 
         # mapping dictionary - forward & backward
         self.class_id_mapping = dict()
@@ -65,6 +62,53 @@ class TabelData():
         self.classes_to_ids = []
         for cl in self.all_classes:
             self.classes_to_ids.append( self.class_id_mapping[cl] )
+
+
+        # --------- regression variables ---------
+
+        # make input and output dicts for each class
+        self.regr_inputs_ = dict()
+        self.regr_outputs_ = dict()
+        for cls_name in self.class_names:
+            rows_where_class = np.where( self.output_[self.class_col] == cls_name )
+            self.regr_inputs_[cls_name] =  self.input_.iloc[rows_where_class]
+            self.regr_outputs_[cls_name] = self.output_.iloc[rows_where_class]
+
+        print("\nFinding values to regress:\n")
+        print("Num output(s) \t Class Name")
+
+        self.regr_names = self.output_.columns
+        self.num_outputs_to_regr = []
+        self.regr_dfs_per_class = dict()
+        # for each class - find columns which can be converted to floats
+        for i, tuple_output in enumerate( self.regr_outputs_.items() ):
+            output_per_class = tuple_output[1] # 0 returns key; 1 returns data
+
+            cols_with_float = []
+            bad_cols = []
+            # go through first row and try to convert each element to float
+            for col_num, val in enumerate( output_per_class.iloc[0,:]):
+                try:
+                    var = float(val) # if fails -> straight to except (skips next line)
+                    cols_with_float.append( col_num )
+                except:
+                    bad_cols.append( col_num )
+
+            print( "%7i \t '%s'"%( len(cols_with_float), self.class_names[i] )  )
+
+            self.num_outputs_to_regr.append( len(cols_with_float) )
+
+            regression_vals_df = output_per_class.iloc[:,cols_with_float]
+            # 'regression_vals_df' has the regression data frame for a given class
+
+            # if regressable elements - link class with the df of valid floats
+            # if no elements to regress - append np.nan
+            if len(cols_with_float) <= 0:
+                self.regr_dfs_per_class[self.class_names[i]] = np.nan
+            else:
+                self.regr_dfs_per_class[self.class_names[i]] = regression_vals_df
+# maybe want to change in future to not just regress by class
+# regression may work without specifying class
 
 
     def get_full_data(self, return_df = False):
@@ -117,7 +161,7 @@ class TabelData():
         return self.class_ids
 
     def get_classes_to_ids(self,):
-        """ Dictionary of classes to their respective IDs."""
+        """ Dictionary of class names to their respective IDs."""
         return self.classes_to_ids
 
     def get_class_data( self,):
@@ -142,12 +186,25 @@ class TabelData():
 
 
 
+    def get_regr_input_data(self,):
+        """Dictionary"""
+        return self.regr_inputs_
+
+    def get_regr_output_data(self,):
+        """Dictionary"""
+        return self.regr_outputs_
+
+    def get_regr_sorted_output_data(self,):
+        """Dictionary"""
+        return self.regr_dfs_per_class
+
+
+
     def plot_class_data(self,):
         # right now the get_class_data does not behave similarly to
         # this function and I think it should have a diff name or something
 
         # this works for 3D.....
-
         full_data = self.full_data
         input_data = self.input_
 
