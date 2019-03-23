@@ -2,10 +2,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import pandas as pd
-
-from scipy.interpolate import LinearNDInterpolator
 import time
 
+# --- classifiers ---
+from scipy.interpolate import LinearNDInterpolator
+from scipy.interpolate import Rbf
+import sklearn.gaussian_process as gp
+# -------------------
 
 class Classifier():
 
@@ -13,22 +16,31 @@ class Classifier():
 
         self.table_data = table_data
 
+        self.class_names = table_data.get_class_names()
         self.class_ids = table_data.get_class_ids()
         self.classes_to_ids = table_data.get_classes_to_ids()
         self.class_data = table_data.get_class_data()
         self.input_data = table_data.get_input_data()
 
-        self.interpolators = []
+        self._interpolators_ = dict()
 
 
-    def linear_ND_interpolator(self):
+    def linear_ND_interpolator(self, data_interval = None):
+        """data_interval = None or int"""
+
         start_time = time.time()
+        line_holder = dict()
+
         for i, cl in enumerate(self.class_data):
             iter_time = time.time()
 
-            line = LinearNDInterpolator( self.input_data[0::5], cl[0::5])
-            #line = LinearNDInterpolator( self.input_data, cl )
-            self.interpolators.append( line )
+            # for running with a subset of the data
+            if data_interval == None:
+                line = LinearNDInterpolator( self.input_data, cl )
+            else:
+                line = LinearNDInterpolator( self.input_data[::data_interval], cl[::data_interval])
+
+            line_holder[self.class_names[i]] = line
 
             time_print = time.time()-start_time
             if i == 0:
@@ -36,7 +48,16 @@ class Classifier():
                 print( "Time to fit %s classifiers ~ %.3f\n"%(len_classes, time_print*len_classes) )
             print("LinearNDInterpolator class %s -- current time: %.3f"%(i,time_print) )
 
-        print("Done")
+        self._interpolators_["LinearNDInterpolator"] = line_holder
+        print("Done training LinearNDInterpolator.")
+
+    def rbf_interpolator(self,):
+        start_time = time.time()
+        print("foobar")
+
+    def gaussian_process_classifier():
+        start_time = time.time()
+        print("foo")
 
 
     def return_probs(self, test_input, all_probs = False):
@@ -44,12 +65,13 @@ class Classifier():
         # N rows = num test points, M columns = num classes
 
         probs = []
-
-        if not self.interpolators: # if empty
+        
+        if not self._interpolators_: # if empty
             raise Exception("\n\nNo trained interpolators exist.")
 
-        for interp in self.interpolators:
-            # for LinearNDInterpolator - each interpolator is on a different class
+        for interp_tuple in self._interpolators_:
+            interp = interp_tuple[1] # 0 key, 1 mapped object
+            # - each interpolator is on a different class
             probs.append( interp( test_input ) ) # for all test points do one interpolator
         # --- 1st array in probs = [ <class 0 prob on 1st test point>, <class 0 prob on 2nd test point>,... ]
         #  to get a row where each element is from a diff class -> transpose probs
