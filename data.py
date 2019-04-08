@@ -213,12 +213,13 @@ class TabelData():
         third_axis  = 'metallicity'       # args
         which_val   = 0 # index of slice value in 3rd axis
 
-        colors = ['#8ed6ff',
-                  '#e88a1a',
-                  '#729d39',
-                  '#ffc0c2',
-                  '#0d627a',
-                  '#ffe867']
+        colors = ['#EC6666',
+                  '#90A245',
+                  '#F5C258',
+                  '#1668E8',
+                  '#473335',
+                  '#98C0CB']
+
         color_dict = {0:colors[0],
                       1:colors[1],
                       2:colors[2],
