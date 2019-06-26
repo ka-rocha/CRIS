@@ -4,7 +4,7 @@ from matplotlib.lines import Line2D
 import pandas as pd
 
 
-class TabelData():
+class TableData():
     """
     TableData
     =========
@@ -13,7 +13,7 @@ class TabelData():
     Required data object for Classifier and Regressor.
     """
 
-    def __init__(self, table_paths, input_cols, output_cols, class_col, ignore_lines = 0):
+    def __init__(self, table_paths, input_cols, output_cols, class_col, ignore_lines = 0, subset_interval = None):
         # +++ probably want to add some functionality for direct load of df
 
         self.df_list = [] # data file list
@@ -34,6 +34,14 @@ class TabelData():
         # df_index_keys setting index of Nth file the data is from with 'dfN'.
         self.full_data = pd.concat( self.df_list, join='outer',
                                    ignore_index = False, keys= self.df_index_keys)
+
+        if subset_interval is not None:
+            len_original_data = len(self.full_data)
+            self.full_data = self.full_data.iloc[np.arange(0, len(self.full_data), subset_interval),:]
+            print("--Using Subset--")
+            print( "%.2f percent of total data set."%( len(self.full_data)/len_original_data * 100 ) )
+
+        print( "Total number of data points: %i\n"%len(self.full_data) )
 
         # column names in fully concatenated data
         self.col_names = np.array(self.full_data.columns)
@@ -107,8 +115,6 @@ class TabelData():
                 self.regr_dfs_per_class[self.class_names[i]] = np.nan
             else:
                 self.regr_dfs_per_class[self.class_names[i]] = regression_vals_df
-# maybe want to change in future to not just regress by class
-# regression may work without specifying class
 
 
     def get_full_data(self, return_df = False):
@@ -200,7 +206,7 @@ class TabelData():
 
 
 
-    def plot_class_data(self,):
+    def plot_class_data(self, which_val = 0):
         # right now the get_class_data does not behave similarly to
         # this function and I think it should have a diff name or something
 
@@ -211,7 +217,7 @@ class TabelData():
         first_axis  = 'log10(M_1i)(Msun)' # args
         second_axis = 'P_i(days)'         # args
         third_axis  = 'metallicity'       # args
-        which_val   = 0 # index of slice value in 3rd axis
+        #which_val   = 0 # index of slice value in 3rd axis
 
         colors = ['#EC6666',
                   '#90A245',
