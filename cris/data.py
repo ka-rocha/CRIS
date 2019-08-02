@@ -206,7 +206,7 @@ class TableData():
 
 
 
-    def plot_class_data(self, which_val = 0):
+    def plot_class_data(self, which_val = 0, save_fig=False, plt_str='0'):
         # right now the get_class_data does not behave similarly to
         # this function and I think it should have a diff name or something
 
@@ -214,9 +214,11 @@ class TableData():
         full_data = self.full_data
         input_data = self.input_
 
+
         first_axis  = 'log10(M_1i)(Msun)' # args
         second_axis = 'P_i(days)'         # args
         third_axis  = 'metallicity'       # args
+        first_axis, second_axis, third_axis = input_data.keys()
         #which_val   = 0 # index of slice value in 3rd axis
 
         colors = ['#EC6666',
@@ -260,4 +262,5 @@ class TableData():
 
         plt.xlabel(first_axis); plt.ylabel(second_axis)
         plt.legend( handles = legend_elements, bbox_to_anchor = (1.03, 1.02))
+        if save_fig: plt.savefig( "data_plot_%s.pdf"%plt_str, bbox_inches='tight')
         plt.show()

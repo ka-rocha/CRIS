@@ -299,7 +299,7 @@ class Classifier():
             Name of classifier to train.
         test_input : ndarray
             N dimensional inputs to be classified.
-        all_probs : bool, optional
+        all_probs : False, optional
             if False - return array (length of test_input) of the maximum
                         probabilty of a class for a given test input.
                         Does not preserve classification only max probability.
@@ -307,7 +307,7 @@ class Classifier():
                         N rows = num test points, M columns = num classes
                         A row is the probabilty for each class for a given input.
                         (an element's column number is its class id)
-        cross_val: bool, optional
+        cross_val: False, optional
             Specifies what interpolators to use.
 
         Returns
@@ -440,6 +440,9 @@ class Classifier():
     def cross_validate(self, classifier_names, alpha, verbose = False ):
         """Cross validate classifiers on data from table_data object.
 
+        *** DOES NOT WORK FOR MORE THAN 1 CLASSIFIER ***
+        because of nans in linear
+
         Parameters
         ----------
         classifier_names : array_str
@@ -473,11 +476,23 @@ class Classifier():
         predicted_class_ids = []
         # Test classification
         for name in classifier_names:
-            pred_ids = self.return_class_predictions(name, self.cross_val_test_input_data, \
-                                                    return_probs = False, cross_val = True)
+            pred_ids_probs_nans = self.return_class_predictions(name, self.cross_val_test_input_data, \
+                                                    return_probs = True, cross_val = True)
+            holder = np.array(pred_ids_probs_nans)
+            pred_ids = holder[0]
+            nans_bool = False
+            if len(holder)==3: # if nans - len is 3, else len is 2 because return_probs==True
+                where_nans = holder[2]
+                nans_bool = True
+
             predicted_class_ids.append( pred_ids )
 
-        num_correct = np.sum( predicted_class_ids == self.cross_val_test_output_data ,axis = 1 )
+        where_not_nan = [ i not in where_nans for i in range(len(self.cross_val_test_output_data))]
+
+        if nans_bool:
+            num_correct = np.sum( np.array(predicted_class_ids) == self.cross_val_test_output_data[where_not_nan] ,axis = 1 )
+        else:
+            num_correct = np.sum( np.array(predicted_class_ids) == self.cross_val_test_output_data ,axis = 1 )
 
         percent_correct = num_correct / len(self.cross_val_test_input_data) * 100.
 
@@ -556,7 +571,7 @@ class Classifier():
 
 
 
-    def get_rnd_test_inputs(self, N):
+    def get_rnd_test_inputs(self, N, verbose=False):
         """Produce randomly sampled 'test' inputs inside domain of input_data.
 
         Parameters
@@ -578,6 +593,8 @@ class Classifier():
         for i in range(num_axis):
             a_max.append( max(self.input_data.T[i]) )
             a_min.append( min(self.input_data.T[i]) )
+            if verbose:
+                print( i, "max:%f"%a_max[i], "min:%f"%a_min[i] )
         # sample N points between max & min in each axis
         axis_rnd_points = []
         for i in range(num_axis):
