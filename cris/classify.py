@@ -22,23 +22,42 @@ def makehash():
 
 
 class Classifier():
+    """
+    Classifier
+    ==========
 
-    def __init__( self, table_data ):
+    Perform one against all classification with a variety of different
+    classification algorithms (interpolators).
 
-        self.table_data = table_data
+    FINISH DOCS
 
-        self.class_names = table_data.get_class_names()
-        self.class_ids = table_data.get_class_ids()
-        self.classes_to_ids = table_data.get_classes_to_ids()
-        self.class_data = table_data.get_class_data()
-        self.input_data = table_data.get_input_data()
+    Parameters
+    ----------
+    TableData_object : instance of <class, TableData>
+        An instance of the TableData class.
+
+    Methods
+    -------
+    """
+
+    def __init__( self, TableData_object ):
+
+        self._TableData_ = TableData_object
+
+        holder = self._TableData_.get_all_class_data()
+        self.class_names = holder[1] #_unique_class_keys_
+        self.classes_to_ids = holder[2] #_class_col_to_ids_
+        self.class_id_mapping = holder[3] #_class_id_mapping_
+        self.binary_class_data = holder[4] #_binary_data_
+        self.input_data = self._TableData_.get_data(what_data = "input")
 
         self._interpolators_ = makehash()
         self._cv_interpolators_ = makehash()
 
-        self._support_interpolators_ = makehash()
+        self.__train_cross_val = False
 
-    def train(self, classifier_name, di = None, verbose = False, train_cross_val = False ):
+
+    def train(self, classifier_name, di = None, verbose = False ):
         """Train a classifier.
 
         Implemented classifiers:
@@ -46,7 +65,7 @@ class Classifier():
             Radial Basis Function ('rbf', ...)
             GaussianProcessClassifier ('gp', ...)
 
-        >>> cl = Classifier( table_data_object )
+        >>> cl = Classifier( TableData_object )
         >>> cl.train( 'linear', di = np.arange(0, Ndatapoints, 5), verbose=True )
 
         Parameters
@@ -70,29 +89,28 @@ class Classifier():
         """
         classifier_key = self.get_classifier_name_to_key(classifier_name)
 
-        if   classifier_key == "LinearNDInterpolator":
-            bi_cls_holder = self.fit_linear_ND_interpolator( data_interval = di, verbose = verbose )
-            extra_bi_cls_holder = self.fit_rbf_interpolator( data_interval = di, verbose = False )
+        if classifier_key == "LinearNDInterpolator":
+            bi_cls_holder = self.fit_linear_ND_interpolator( data_interval=di, verbose=verbose )
+            extra_bi_cls_holder = self.fit_rbf_interpolator( data_interval=di, verbose=False )
         elif classifier_key in "RBF":
             bi_cls_holder = self.fit_rbf_interpolator( data_interval = di, verbose = verbose )
         elif classifier_key in "GaussianProcessClassifier":
             bi_cls_holder = self.fit_gaussian_process_classifier( data_interval = di, verbose = verbose )
         else:
-            print("No classifiers with name %s"%classifier_name)
+            print("No classifiers with name {0}.".format(classifier_name))
             return
 
         for col_key, cls_obj in bi_cls_holder.items():
             if verbose:
-                print('\tdict loc:',classifier_key, col_key)
-            if train_cross_val:
-                #self._cv_interpolators_.update( {which_classifier:bi_cls_holder} )
+                print("\tdict loc: {0} {1}".format(classifier_key, col_key))
+            if self.__train_cross_val:
                 self._cv_interpolators_[classifier_key][col_key] = cls_obj
             else:
-                #self._interpolators_.update( {which_classifier:bi_cls_holder} )
                 self._interpolators_[classifier_key][col_key] = cls_obj
 
         if verbose:
-            print("Done training %s."%classifier_key)
+            print("Done training {0}.".format(classifier_key))
+        return
 
 
     def fit_linear_ND_interpolator(self, data_interval = None, verbose = False):
@@ -104,7 +122,7 @@ class Classifier():
         ----------
         data_interval : array_int, optional
             Array indicies of data used to train (training on a subset).
-            if None - train on whole data set
+            if None (default) train on whole data set
         verbose : bool, optional
             Print statements with more information while training.
 
@@ -124,7 +142,7 @@ class Classifier():
 
         binary_classifier_holder = dict()
 
-        for i, cls_data in enumerate(self.class_data):
+        for i, cls_data in enumerate(self.binary_class_data):
             iter_time = time.time()
 
             # for running with a subset of the data
@@ -139,7 +157,7 @@ class Classifier():
             time_print = time.time()-start_time
             if verbose:
                 if i == 0:
-                    len_classes = len(self.class_ids)
+                    len_classes = len(self._TableData_.class_ids)
                     print( "Time to fit %s classifiers ~ %.3f\n"%(len_classes, time_print*len_classes) )
                 print("LinearNDInterpolator class %s -- current time: %.3f"%(i, time_print) )
 
@@ -155,7 +173,7 @@ class Classifier():
         ----------
         data_interval : array_int, optional
             Array indicies of data used to train (training on a subset).
-            if None - train on whole data set
+            if None (default) train on whole data set
         verbose : bool, optional
             Print statements with more information while training.
 
@@ -175,7 +193,7 @@ class Classifier():
 
         binary_classifier_holder = dict()
 
-        for i, cls_data in enumerate(self.class_data):
+        for i, cls_data in enumerate(self.binary_class_data):
             iter_time = time.time()
 
             # for running with a subset of the data
@@ -200,13 +218,14 @@ class Classifier():
             time_print = time.time()-start_time
             if verbose:
                 if i == 0:
-                    len_classes = len(self.class_ids)
+                    len_classes = len(self._TableData_.class_ids)
                     print( "Time to fit %s classifiers ~ %.3f\n"%(len_classes, time_print*len_classes) )
                 print("RBF class %s -- current time: %.3f"%(i, time_print) )
 
         return binary_classifier_holder
 
-    def fit_gaussian_process_classifier(self, data_interval = None, verbose = False):
+
+    def fit_gaussian_process_classifier(self, data_interval=None,my_kernel=None, n_restarts=5, verbose=False):
         """fit a Gaussian Process classifier
         implementation from: scikit-learn
         (https://scikit-learn.org/stable/modules/gaussian_process.html)
@@ -215,7 +234,11 @@ class Classifier():
         ----------
         data_interval : array_int, optional
             Array indicies of data used to train (training on a subset).
-            if None - train on whole data set
+            if None (default) train on whole data set
+        my_kernel : kernel
+            Set the kernel for the GPC.
+        n_restarts : int
+            Number of restarts for the GPC.
         verbose : bool, optional
             Print statements with more information while training.
 
@@ -235,11 +258,20 @@ class Classifier():
 
         binary_classifier_holder = dict()
 
-        for i, cls_data in enumerate(self.class_data):
+        for i, cls_data in enumerate(self.binary_class_data):
             iter_time = time.time()
 
-            kernel = gp.kernels.RBF( [1,1,1], [(1e-3,1e3), (1e-3,1e3), (1e-3, 1e3)] )
-            gpc = gp.GaussianProcessClassifier(kernel = kernel)
+            if my_kernel is None:
+                num_dim = len(self.input_data[0])
+                starting_loc = [ 1 for i in range(num_dim) ]
+                axis_ranges = [ (1e-3,1e3) for i in range(num_dim) ]
+                #kernel = gp.kernels.RBF( [1,1,1], [(1e-3,1e3), (1e-3,1e3), (1e-3, 1e3)] )
+                kernel = gp.kernels.RBF( starting_loc, axis_ranges )
+            else:
+                kernel = my_kernel
+
+            gpc = gp.GaussianProcessClassifier(kernel = kernel,
+                                               n_restarts_optimizer = n_restarts)
 
             # for running with a subset of the data
             if data_interval is None:
@@ -248,13 +280,17 @@ class Classifier():
                 di = np.array(data_interval)
                 line = gpc.fit( self.input_data[di], cls_data[di] )
 
+            if verbose:
+                print( "\t kernel:\n{0}".format(kernel) )
+
+
             binary_classifier_holder[self.class_names[i]] = line
 
             time_print = time.time()-start_time
 
             if verbose:
                 if i == 0:
-                    len_classes = len(self.class_ids)
+                    len_classes = len(self._TableData_.class_ids)
                     print( "Time to fit %s classifiers ~ %.3f\n"%(len_classes, time_print*len_classes) )
                 print("GaussianProcessClassifier class %s -- current time: %.3f"%(i, time_print) )
 
@@ -275,23 +311,25 @@ class Classifier():
         return key
 
 
-    def remove_nans( self, trans_probs ):
+    def __remove_nans( self, trans_probs, verbose=False ):
+        """Given an array of probabilities, remove the nans."""
         bool_row_index_where_nan = np.isnan( trans_probs.T[0] )
-        where_nan = np.where( bool_row_index_where_nan == True )[0]
-        where_not_nan = np.where( bool_row_index_where_nan == False )[0]
+        where_nan = np.where( bool_row_index_where_nan==True )[0]
+        where_not_nan = np.where( bool_row_index_where_nan==False )[0]
         how_many_rows = len( trans_probs.T[0] )
         how_many_nans = np.sum(bool_row_index_where_nan)
-        if how_many_nans > 0:
-            clean_trans_probs = np.array([trans_probs[i] for i in where_not_nan])
-            print("Nans omitted: %i"%how_many_nans)
-            return clean_trans_probs, where_nan
-        else:
-            return trans_probs, []
+
+        clean_trans_probs = np.array([trans_probs[i] for i in where_not_nan])
+        if verbose:
+            print("Nans omitted: {0}".format(how_many_nans))
+        return clean_trans_probs, where_not_nan
 
 
-    def return_probs(self, classifier_name, test_input, all_probs = False, cross_val = False):
+    def return_probs(self, classifier_name, test_input, verbose = False):
         """Return probability that a given input corresponds to a class using
         trained classifiers.
+
+        # UDPATE DOCS
 
         Parameters
         ----------
@@ -299,30 +337,12 @@ class Classifier():
             Name of classifier to train.
         test_input : ndarray
             N dimensional inputs to be classified.
-        all_probs : False, optional
-            if False - return array (length of test_input) of the maximum
-                        probabilty of a class for a given test input.
-                        Does not preserve classification only max probability.
-            if True  - return N x M matrix where
-                        N rows = num test points, M columns = num classes
-                        A row is the probabilty for each class for a given input.
-                        (an element's column number is its class id)
-        cross_val: False, optional
-            Specifies what interpolators to use.
+        verbose : bool, optional
 
         Returns
         -------
-        probs : ndarray
-            The 'probability' for a given input to be in all possible classes.
-            (See all_probs if True.)
-
-        max_probs: array
-            Returns the maximum 'probability' found for any class.
-            (See all_probs if False)
-
-        where_nan: array
-            Indicies of the input values that return nan.
-            If no nans then return is an empty list.
+        normalized_probs : ndarray
+        where_not_nan: ndarray
         """
 
         probs = []
@@ -333,14 +353,14 @@ class Classifier():
         # convert the user input shorthand into a valid key for dict
         classifier_name = self.get_classifier_name_to_key(classifier_name)
 
-        if cross_val:
+        if self.__train_cross_val:
             interpolators = self._cv_interpolators_[classifier_name].items()
         else:
             interpolators = self._interpolators_[classifier_name].items()
 
         for key, interp in interpolators:
             # - each interpolator is on a different class
-            if classifier_name == "RBF":  ################# this could get complicated !!!
+            if classifier_name == "RBF":
                 argList = []
                 for col in range( len(test_input[0]) ):
                     argList.append( test_input.T[col] )
@@ -350,46 +370,70 @@ class Classifier():
                 probs.append( cleaned_data )
             elif classifier_name == "GaussianProcessClassifier":
                 #print( key, interp.predict(test_input), interp.predict_proba( test_input ).T[1] )
-                # - the [1] is selecting the second output from predict_proba for all points
-                # - the second output being the probability that it is the current class
-                # - this is a similar form to all the other classifier output
                 probs.append( interp.predict_proba(test_input).T[1] )
+                # The [1] is selecting the second output from predict_proba for all points
+                # The second output being the probability that it is the current class
+                # This is a similar form to all the other classifier output
             elif classifier_name == "LinearNDInterpolator":
                 unfiltered_output = interp( test_input ) # can return nan if out of bounds
                 probs.append( unfiltered_output )
+            else:
+                print("Name not recognized: '{0}'".format(classifier_name))
         # for loop - all test points do one interpolator
         # 1st array in probs = [ <class 0 prob on 1st test point>, <class 0 prob on 2nd test point>,... ]
         #  to get a row where each element is P for a diff class -> transpose probs
 
         trans_probs = np.array(probs).T
-        clean_trans_probs, where_nan = self.remove_nans(trans_probs) # remove nans
+        clean_trans_probs, where_not_nan = self.__remove_nans(trans_probs, verbose=verbose) # remove nans
 
-        totals_per_input = np.sum(clean_trans_probs, axis = 1)
-        normalized_probs = clean_trans_probs/totals_per_input[:,np.newaxis]
+        try:
+            totals_per_input = np.sum(clean_trans_probs, axis = 1)
+            normalized_probs = clean_trans_probs/totals_per_input[:,np.newaxis]
+        except:
+            normalized_probs = [[0]]
 
-        if all_probs:
-            return normalized_probs, where_nan
+        return normalized_probs, where_not_nan
+
+
+    def get_class_predictions(self, classifier_name, test_input, return_ids=True):
+        """Get class predictions in the form of class IDs or the original
+        classification key. This method also returns the probability of the class
+        that was predicted.
+
+        Parameters
+        ----------
+        classifier_name : str
+            Name of classification algorithm to use.
+        test_input : ndarray
+            Input values to predict. Same shape as input data.
+        return_ids : bool, optional
+            If True (default), return class IDs.
+            Else, return the original classification keys.
+
+        Returns
+        -------
+        pred_class_ids : array
+            Predicted class IDs given test input.
+        probs : array
+            Probability the classifier gives for the chosen class.
+        where_not_nan : array
+            Inidices where there are no nans (from LinearNDInterpolator).
+            You may use this to pick out which input data gives a valid
+            classification.
+        """
+        all_probs, where_not_nan = self.return_probs(classifier_name, test_input)
+
+        probs = np.max( all_probs, axis=1 )
+        pred_class_ids = np.argmax( all_probs, axis = 1 )
+
+        if return_ids:
+            return pred_class_ids, probs, where_not_nan
         else:
-            max_probs = np.max(normalized_probs, axis = 1)
-            return max_probs, where_nan
+            pred_classes = [self.class_id_mapping[i] for i in pred_class_ids]
+            return pred_classes, probs, where_not_nan
 
 
-    def return_class_predictions(self, classifier_name, test_input, return_probs = False, cross_val = False):
-        """ Will return an array where_nan which contains indicies of input that return nan """
-        probs, where_nan = self.return_probs(classifier_name, test_input, all_probs = True, cross_val = cross_val)
-
-        pred_class_ids = np.argmax( probs, axis = 1 )
-
-        if return_probs and len(where_nan)==0:
-            return pred_class_ids, probs
-        elif return_probs and len(where_nan)>0:
-            return pred_class_ids, probs, where_nan
-        else:
-            return pred_class_ids
-
-
-
-    def make_cross_val_data(self, alpha):
+    def get_cross_val_data(self, alpha):
         """Randomly sample the data set and seperate training and test data.
 
         Parameters
@@ -400,13 +444,15 @@ class Classifier():
         Returns
         -------
         sorted_rnd_int_vals : array
-            Indicies which will be used as training points.
+            Array indicies for data used to train interpolators.
+        cv_test_input_data : array
+            Input test data to perform cross validation.
+        cv_test_output_data : array
+            Output test data to perform cross validation.
         """
         num_points = int( len(self.input_data)*alpha )
         rnd_input_train = []; rnd_outout_train = []; rnd_int_vals = []
         rnd_int_set = set()
-
-        #print("Num points", num_points)
 
         ct = 0
         while len(rnd_int_vals) < num_points and ct < 1e7:
@@ -420,88 +466,83 @@ class Classifier():
         sorted_rnd_int_vals = sorted(rnd_int_vals)
 
         # Random training data
-        self.cross_val_train_input_data = self.input_data[sorted_rnd_int_vals,:]
-        self.cross_val_train_class_data = np.argmax( self.class_data.T[sorted_rnd_int_vals,:], axis=1 )
+        #self.cross_val_train_input_data = self.input_data[sorted_rnd_int_vals,:]
+        #self.cross_val_train_class_data = np.argmax( self.binary_class_data.T[sorted_rnd_int_vals,:], axis=1 )
 
         test_int_vals = []
         for i in range(len(self.input_data)):
             if i in sorted_rnd_int_vals:
                 pass
             else:
-                test_int_vals.append( i )
+                test_int_vals.append(i)
 
         # The remainder which will be used to test fits
-        self.cross_val_test_input_data = self.input_data[test_int_vals,:]
-        self.cross_val_test_output_data = np.argmax( self.class_data.T[test_int_vals,:], axis=1 )
+        cv_test_input_data = self.input_data[test_int_vals,:]
+        cv_test_output_data = np.argmax( self.binary_class_data.T[test_int_vals,:], axis=1 )
 
-        return sorted_rnd_int_vals
+        return sorted_rnd_int_vals, cv_test_input_data, cv_test_output_data
 
 
     def cross_validate(self, classifier_names, alpha, verbose = False ):
         """Cross validate classifiers on data from table_data object.
-
-        *** DOES NOT WORK FOR MORE THAN 1 CLASSIFIER ***
-        because of nans in linear
+        For each iteration, the classifiers specified are all trained
+        and tested on the same random subset of data.
 
         Parameters
         ----------
-        classifier_names : array_str
+        classifier_names : array
             Names of classifiers to train.
         alpha : float
             Fraction of data set to use for training. (0.05 = 5% of data set)
-        verbose: bool, optional
+        verbose : bool, optional
             Print statements with more information while training.
 
         Returns
         -------
         percent_correct: ndarray
-            Percent correct classification. Elements corresponds to the
-            classifier specified in classifier_names.
+            Percent correct classification on (1-alpha)% of the data set.
+            Element order matches the order of classifier_names.
         time_to_train : ndarray
-            Time to train classifiers on a data set. Elements corresponds to
-            the classifier specified in classifier_names.
+            Time to train classifiers on a data set. Element order matches
+            the order of classifier_names.
         """
-        train_data_indicies = self.make_cross_val_data( alpha )
+        self.__train_cross_val = True
+
+        train_data_indicies, cv_test_input_data, cv_test_output_data = self.get_cross_val_data( alpha )
 
         if verbose:
-            print("alpha: %f, num_training_points %.0f"%(alpha, len(train_data_indicies)) )
+            print("alpha: {0}, num_training_points: {1}".format(alpha, len(train_data_indicies)) )
 
         time_to_train = []
         # Train classifiers
         start_time = time.time()
         for name in classifier_names:
-            self.train( name , di = train_data_indicies, train_cross_val = True  )
-            time_to_train.append( time.time() - start_time )
+            self.train( name, di=train_data_indicies )
+            time_to_train.append( time.time()-start_time )
 
         predicted_class_ids = []
+        where_not_nans_holder = []
+        num_corr_holder = []
         # Test classification
         for name in classifier_names:
-            pred_ids_probs_nans = self.return_class_predictions(name, self.cross_val_test_input_data, \
-                                                    return_probs = True, cross_val = True)
-            holder = np.array(pred_ids_probs_nans)
-            pred_ids = holder[0]
-            nans_bool = False
-            if len(holder)==3: # if nans - len is 3, else len is 2 because return_probs==True
-                where_nans = holder[2]
-                nans_bool = True
+            pred_ids, probs, where_not_nan = \
+                        self.return_class_predictions(name, cv_test_input_data)
 
             predicted_class_ids.append( pred_ids )
+            where_not_nans_holder.append( where_not_nan )
+            # pred_ids already has nans omitted... the output data needs to have those removed...
+            num_correct = np.sum(pred_ids == cv_test_output_data[where_not_nan])
+            num_corr_holder.append( num_correct )
 
-        where_not_nan = [ i not in where_nans for i in range(len(self.cross_val_test_output_data))]
-
-        if nans_bool:
-            num_correct = np.sum( np.array(predicted_class_ids) == self.cross_val_test_output_data[where_not_nan] ,axis = 1 )
-        else:
-            num_correct = np.sum( np.array(predicted_class_ids) == self.cross_val_test_output_data ,axis = 1 )
-
-        percent_correct = num_correct / len(self.cross_val_test_input_data) * 100.
+        percent_correct = np.array(num_corr_holder)/len(cv_test_input_data[where_not_nan]) * 100.
 
         if verbose:
             print("\nInterp \t percent correct")
             print("------   ----------------")
             for i in range(len(classifier_names)):
-                print( "%s \t %f"%(classifier_names[i], percent_correct[i]) )
+                print( "{0} \t {1:.3f}".format(classifier_names[i], percent_correct[i]) )
 
+        self.__train_cross_val = False
         return percent_correct, time_to_train
 
 
@@ -535,8 +576,8 @@ class Classifier():
         N_total_points = len(self.input_data)
 
         for frac in alphas:
-            print("alpha", frac)
-            print("N training points", int(N_total_points*frac))
+            print("alpha: {0}".format(frac))
+            print("N training points: {0}".format(int(N_total_points*frac)))
 
             cross_df = pd.DataFrame( columns = interp_type)
             time_df = pd.DataFrame( columns = interp_type)
@@ -568,24 +609,60 @@ class Classifier():
             cross_df.to_csv(folder_path + "cross_val_data_f%s"%( str(frac) ) )
             time_df.to_csv(folder_path + "timing_data_f%s"%(str(frac)))
         print(" ------------ DONE ------------ ")
+        return
+
+
+    def make_max_cls_plot(self,):
+        """THIS FUNCTION DOES NOT WORK
+        DO NOT USE YET!"""
+        return
+        vals = self.get_rnd_test_inputs(4000)
+
+        class_vals, probs = classify_obj.return_class_predictions("rbf", vals, return_probs=True )
+
+        fig, (cls_data, prob) = plt.subplots( 1, 2, figsize=(12,4), \
+                                gridspec_kw={'width_ratios': [1., 1.2]} )
+
+        cls_data.set_title("Predictions from trained classifier")
+        cls_data.set_xlabel("input_1"); cls_data.set_ylabel("input_2")
+        cls_data.scatter( self._TableData_.get_input_data().T[0],
+                          self._TableData_.get_input_data().T[1],
+                          c = self._TableData_.get_output_data().T[0])
+                          # You need to use a mapping to get classes to colors
+                          # I should add this to data.py
+
+        prob.set_xlabel("input_1")
+        prob_plt = prob.scatter( vals.T[0], vals.T[1], \
+                                c = np.max( probs, axis = 1 ), cmap = 'bone', )
+
+        cb = fig.colorbar( prob_plt)
+        cb.ax.set_ylabel( "Maximum classification probability" )
+        plt.show()
 
 
 
-    def get_rnd_test_inputs(self, N, verbose=False):
+    def get_rnd_test_inputs(self, N, other_rng=dict(), verbose=False):
         """Produce randomly sampled 'test' inputs inside domain of input_data.
 
         Parameters
         ----------
-        N : int
+        N: int
             Number of test inputs to return.
+        other_rng: dict, optional
+            Change the range of random sampling in desired axis. By default,
+            the sampling is done in the range of the training data.
+            The axis is specified with an integer key and the value
+            is a list specifying the range. {1:[min, max]}
+        verbose: bool, optional
+            Print diagnostic information. (default False)
 
         Returns
         -------
         rnd_test_points : ndarray
-            ndarray with the same shape as the input data.
+            Test points randomly sampled in the range of the training data
+            in each axis unless otherwise specified in 'other_rng'.
+            Has the same shape as input data from TableData.
         """
-        # ++ could add ability to specify rng of axis
-
         num_axis = len(self.input_data[0])
 
         # find max and min in each axis
@@ -593,12 +670,18 @@ class Classifier():
         for i in range(num_axis):
             a_max.append( max(self.input_data.T[i]) )
             a_min.append( min(self.input_data.T[i]) )
-            if verbose:
-                print( i, "max:%f"%a_max[i], "min:%f"%a_min[i] )
         # sample N points between max & min in each axis
         axis_rnd_points = []
         for i in range(num_axis):
-            r = np.random.uniform( low = a_min[i], high = a_max[i], size = int(N) )
+            if i in other_rng:
+                b_min, b_max = other_rng[i]
+            else:
+                b_min, b_max = a_min[i], a_max[i]
+            if verbose:
+                print("{0} - min: {1}, max: {2}".format(i, b_min, b_max) )
+
+            r = np.random.uniform( low = b_min, high = b_max, size = int(N) )
+
             # this reshape is necessary to concatenate
             axis_rnd_points.append( r[:,np.newaxis] )
 

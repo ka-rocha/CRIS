@@ -4,34 +4,54 @@ import pandas as pd
 import time
 import sys
 
-class sampler():
+import scipy.stats
 
-    def __init__( self, classifier ):
-        self.classifier_obj = classifier
-        #self.regressor_obj = regressor
+class Sampler():
+    """Add some docstrings"""
 
-        # Find the bounds of the walker
+    def __init__( self, classifier, regressor = None ):
+        self._Classifier_ = classifier
+        self._Regressor_ = regressor
+
+        # Find the bounds of the walker - should be TableData attribute
         self.max_vals = []
         self.min_vals = []
-        input_data_cols = self.classifier_obj.table_data.get_input_data().T
+        input_data_cols = self._Classifier_.table_data.get_input_data().T
         for data in input_data_cols:
             self.max_vals.append(max(data))
             self.min_vals.append(min(data))
+        # self._max_vals_, self._min_vals_ = self._Classifier_.get_data_bounds()
 
         # You can save chains_history in here
         self._chain_step_hist_holder_ = dict()
 
+
     def analytic_target_dist( self, name, args ):
+        """For testing."""
         mu, nu = args
         arg1 = - mu**2 - ( 9 + 4*mu**2 +8*nu )**2
         arg2 = - 8*mu**2 - 8*( nu - 2 )**2
         return (16)/(3*np.pi) * ( np.exp(arg1) + 0.5*np.exp(arg2) )
 
     def classifier_target_dist( self, classifier_name, args  ):
+        """Target distribution using classification only."""
         correct_shape_args = np.array( [args] )
-        max_probs, nan_locs = self.classifier_obj.return_probs( classifier_name, correct_shape_args, all_probs=False )
+        max_probs, nan_locs = self._Classifier_.return_probs( classifier_name, correct_shape_args, \
+                                                              verbose=False )
+        if len(nan_locs) > 0:
+            return 0
+        else:
+            return (1-max_probs)
+
+    def cls_rgr_target_dist(self, names, args):
+        """This isn't even a function in regressor, this is what we need to do"""
+        correct_shape_args = np.array( [args] )
+        max_probs, nan_locs = self._Classifier_.return_probs( names[0], correct_shape_args, all_probs=False )
         # The second return of return_probs is a list filled with nan_locations
-        return max_probs
+        if len(nan_locs) > 0:
+            return 0
+        #regr_error, nan_locs = self._Regressor_.return_errors( names[1], correct_shape_args )
+        return 0
 
 
     def save_chain_step_history(self, key, chain_step_history, overwrite=False):
@@ -57,7 +77,7 @@ class sampler():
                     upper_limit_reject = 1e5, verbose = False ):
         """Runs a Paralel Tempered MCMC.
 
-        >>>
+        # TODO: UPDATE THESE DOCS
 
         Parameters
         ----------
@@ -65,7 +85,7 @@ class sampler():
             Sets the maximum temperature MCMC in the chain.
         N_tot : int
             The total number of iterations for the PTMCMC.
-        target_dist : method with the form  F( name, element of step_history )
+        target_dist : callable,  f( name, element of step_history )
             The target distribution to sample.
             The 'name' argument specifies the classifier interpolator to use.
             (A 2D analytic function is provided - analytic_target_dist)
@@ -90,8 +110,8 @@ class sampler():
 
         num_chains = len(T_list)
         if verbose:
-            print("Num chains: %i"%num_chains)
-            print("Temperatures: \n", T_list )
+            print("Num chains: {0}".format(num_chains) )
+            print("Temperatures: {0}".format(T_list) )
 
         # plotting
         chain_holder = dict()
@@ -100,7 +120,7 @@ class sampler():
 
         N_loops = int( N_tot/N_draws_per_swap )
 
-        # Initial conditions for all chains
+        # Initial conditions for all links in chain
         this_iter_step_loc = [init_pos]*num_chains
 
         # Accept ratio tracker
@@ -108,6 +128,7 @@ class sampler():
         total_rej = np.zeros( num_chains )
         acc_ratio_holder = np.zeros( num_chains )
 
+        start_time = time.time()
         for k in range(N_loops):
             # Number of draws before swap
             N_draws = N_draws_per_swap
@@ -133,7 +154,7 @@ class sampler():
 
             if verbose:
                 #print( "acc/total: {0}".format(acc_ratio_holder[0]), end="\r" )
-                b = "num_acc/total: Tmax {0:.4}, Tmin {1:.4}".format( acc_ratio_holder[0], acc_ratio_holder[-1] )
+                b = "num_acc/total: Tmax {0:.4}, Tmin {1:.4}, k {2}".format( acc_ratio_holder[0], acc_ratio_holder[-1], k )
                 sys.stdout.write('\r'+b)
 
             # Calc H to see if chains SWAP
@@ -146,8 +167,14 @@ class sampler():
                       (target_dist( classifier_name, args_i ))**(1/T_list[i+1])
                 bot = (target_dist( classifier_name, args_i ))**(1/T_list[i]) * \
                       (target_dist( classifier_name, args_i_1 ))**(1/T_list[i+1])
+
+                try:
+                    ratio = top/bot
+                except:
+                    # can get div by 0 errors when using linear because of nans
+                    ratio = 0
                 # inter-chain transition probability
-                H = min( 1 , top/bot )
+                H = min( 1 , ratio )
 
                 chance = np.random.uniform(low=0, high=1)
                 if chance <= H:
@@ -159,7 +186,7 @@ class sampler():
                     reject+=1
             #print(accept, reject); print(last_step_holder)
 
-            # Update current params (could be swapped and such)
+            # Update current params (could be swapped)
             # to read into MCMC on next iteration!!!
             this_iter_step_loc = last_step_holder
 
@@ -168,7 +195,9 @@ class sampler():
             chain_step_history[pos] = np.concatenate(steps)
 
         if verbose:
-            print( "\nLength of chains: \n", np.array([len(chain_step_history[i]) for i in range(num_chains)]) )
+            print( "\nLength of chains: \n{0}".format(np.array([len(chain_step_history[i]) for i in range(num_chains)]))  )
+            fin_time_s = time.time()-start_time
+            print( "Finished in {0:.2f} seconds, {1:.2f} minutes.".format(fin_time_s, fin_time_s/60) )
             self.make_trace_plot( chain_step_history, T_list, 0, save_fig=False )
             self.make_trace_plot( chain_step_history, T_list, num_chains-1, save_fig=False )
 
@@ -225,14 +254,24 @@ class sampler():
 
             # f(θ)
             val = target_dist( classifier_name, current_step )
-
             # θ+Δθ
             trial_step = current_step + np.random.normal( 0, alpha, size=len(current_step) )
-
             # f(θ+Δθ)
             trial_val = target_dist( classifier_name, trial_step )
 
-            accept_prob = min( 1, (trial_val/val)**(1/T) )
+            # check if the trial step is in the range of data
+            for i, step_in_axis in enumerate(trial_step):
+                if (step_in_axis <= self.max_vals[i] and step_in_axis >= self.min_vals[i]):
+                    pass
+                else:
+                    trial_val = 0 # essential reject points outside of range
+
+            try:
+                ratio = trial_val/val
+            except ZeroDivisionError:
+                ratio = 0
+
+            accept_prob = min( 1, (ratio)**(1/T) )
 
             chance = np.random.uniform(low=0, high=1)
             if chance <= accept_prob:
@@ -244,31 +283,182 @@ class sampler():
         return np.array(step_history), accept, reject
 
 
-    def make_trace_plot( self, chain_holder, T_list, Temp, save_fig=False ):
-        which_temp = Temp
+    def normalize_step_history(self, step_history):
+        """Take steps and normalize [0,1] according to max and min in each axis.
+        The max and min are taken from the original data set from TalbeData."""
+        normed_steps = np.copy(step_history)
+        for j, steps_in_axis in enumerate(step_history.T):
+            normed_steps.T[j] = (steps_in_axis - self.min_vals[j])/(self.max_vals[j]-self.min_vals[j])
+        return normed_steps
+
+    def undo_normalize_step_history(self, normed_steps):
+        """Takes normed steps from [0,1] and returns their value
+        in the original range of the axes. Based off the range of training data"""
+        mapped_steps = np.copy(normed_steps)
+        for j, steps_in_axis in enumerate(normed_steps.T):
+            mapped_steps.T[j] = steps_in_axis * (self.max_vals[j]-self.min_vals[j]) + self.min_vals[j]
+        return mapped_steps
+
+
+    def do_density_logic( self, step_history, N_points, Kappa,\
+                            shuffle = True, norm_steps = False, var_mult = None, \
+                            add_mvns_together = False, verbose = False ):
+        """Do the density based off of the normal gaussian kernel on each point. This method
+        automatically takes out the first 5% of steps of the mcmc so that the first starting
+        points are not chosen automatically (if you start in a non-ideal region)"""
+
+        # shuffle the order of the steps
+        if shuffle:
+            if verbose: print("Shuffling steps....")
+            np.random.shuffle(step_history) # returns none
+
+        # normalize steps
+        if norm_steps:
+            if verbose: print( "Normalizing steps...." )
+            step_history = self.normalize_step_history( step_history )
+
+        # Set the default average length scale
+        num_dim = len( self._Classifier_.input_data[0] )
+        sigma = Kappa * 0.5 * (N_points)**(-1./num_dim)
+
+        # We assume the covaraince is the identity - later we may pass the entire array
+        # but for now we just assume you pass a variance multiplier (var_mult)
+        if var_mult is None:
+            var_mult = np.array([1]*num_dim)
+        else:
+            var_mult = np.array( var_mult )
+
+        if verbose:
+            print( "Num dims: {0}".format(num_dim) )
+            print( "length scale sigma: {0}".format(sigma) )
+            print( "var_mult: {0}".format(var_mult) ) # variance multiplier
+            print( "Kappa: {0}".format(Kappa) ) # multiplier of average variance
+
+        accepted_points = []
+        accepted_sigmas = []
+        max_val_holder = []
+        accepted_mvn_holder = []
+        rejected_points = []
+
+        skip_steps = int(len(step_history)*0.05)
+        good_steps = step_history[skip_steps:] # skip first 5% of steps to get into a good region
+
+        for i in range(len(good_steps)):
+            proposed_step = good_steps[i]
+
+            accept = False
+            if len(accepted_points) == 0:
+                accept = True
+            else:
+                # If you enter you must have accepted one point
+                k = len(Sigma)
+                max_val = 1/np.sqrt( (2*np.pi)**(k) * np.linalg.det(Sigma) )
+                max_val_holder.append( max_val )
+                rnd_chance = np.random.uniform( 0, max(max_val_holder), size = 1 )
+                # we will choose the chance from [0, highest point in distr]
+
+                distr_holder = []
+                for point in accepted_mvn_holder:
+                    eval_mvn_at_new_step = point.pdf( proposed_step )
+                    distr_holder.append( eval_mvn_at_new_step )
+
+
+                if add_mvns_together:
+                    # instead of checking each individual point keeping all mvns
+                    # seperate, we want to add them together and get upper bound
+                    # IF we do this we need to change the MVN to not be normalized !!!!
+                    # THE UNORMALIZED MVN THING IS NOT IMPLEMENTED
+                    total_chance_above_distr = rnd_chance > np.sum(distr_holder)
+                else:
+                    total_chance_above_distr = np.sum( rnd_chance > distr_holder )
+
+
+                if len(accepted_points) == total_chance_above_distr:
+                    accept = True
+                else:
+                    pass   # REJECT
+
+            if accept:
+                # https://stackoverflow.com/questions/619335/a-simple-algorithm-for-generating-positive-semidefinite-matrices
+                #corner = np.random.normal(0,0.1, 1)
+                #A = np.array( [ [sigma, corner], [corner, sigma] ] )
+                #Sigma = np.dot(A,A.transpose())
+                #Sigma = [ [sigma*var_mult[0], 0.], [0., sigma*var_mult[1]] ]
+                Sigma = sigma * np.identity( len(var_mult) ) * np.array( [var_mult] )
+                mvn = scipy.stats.multivariate_normal( proposed_step, Sigma )
+
+                accepted_mvn_holder.append( mvn )
+                accepted_sigmas.append( Sigma )
+                accepted_points.append( proposed_step )
+            else:
+                rejected_points.append( proposed_step )
+
+        if verbose:
+            print("Num accepted: {0}".format(len(accepted_points)) )
+            print("Num rejected: {0}".format(len(rejected_points)) )
+
+        if norm_steps:
+            if verbose: print("Unormalizing steps....")
+            accepted_points = self.undo_normalize_step_history(accepted_points)
+            rejected_points = self.undo_normalize_step_history(rejected_points)
+
+        return np.array(accepted_points), np.array(rejected_points), np.array(accepted_sigmas)
+
+
+
+    def get_proposed_points( self, step_history, N_points, Kappa, \
+                             shuffle = False, norm_steps = False, \
+                             add_mvns_together = False, \
+                             var_mult = None, verbose = False ):
+        """wrapper for multiple calls to the density"""
+
+        acc_pts, rej_pts, acc_sigmas = self.do_density_logic( step_history, N_points, Kappa, \
+                                                    norm_steps = norm_steps, \
+                                                    var_mult = var_mult, \
+                                                    shuffle = shuffle, \
+                                                    add_mvns_together = add_mvns_together, \
+                                                    verbose = verbose )
+        # plot of the little mvns maybe???
+        self.make_prop_points_plots(acc_pts)
+        return acc_pts
+
+
+    def make_prop_points_plots(self, prop_points, show_fig = True, save_fig=False ):
+        """If your inputs are 2d then we can plot them like this."""
+        return None
+
+
+
+
+    def make_trace_plot( self, chain_holder, T_list, Temp, save_fig=False, show_fig=True ):
+        """Make a trace plot of the position of a sampler in an axis vs step number.
+        This function makes titles assumes you are using the data from classifier."""
+
+        if show_fig == False and save_fig == False:
+            return
+
+        which_temp = Temp # int? index
 
         n_axis = len(chain_holder[which_temp].T)
         steps = chain_holder[which_temp].T
 
-        fig, axs = plt.subplots(nrows=n_axis, ncols=2,
-                                       figsize=(10,6), dpi=100,
-                                       gridspec_kw={'width_ratios': [1.8, 1]})
-        axis_names = self.classifier_obj.table_data.get_input_data(return_df=True).keys()
+        fig, axs = plt.subplots(nrows=n_axis, ncols=2, \
+                                       figsize=(10,5), dpi=100, \
+                                       gridspec_kw={'width_ratios':[1.8, 1]})
+        axis_names = self._Classifier_.table_data.get_input_data(return_df=True).keys()
         for num, ax in enumerate(axs):
-            ax[0].plot(steps[num], '-', color = "C4")
-            ax[0].set_title( "Input: %s"%(axis_names[num]) )
-            ax[0].set_ylabel( "Axis %i"%(num) + " , T=%.2f"%(T_list[which_temp]), fontsize=12 )
-            ax[0].set_xlabel("N steps", fontsize=12)
+            ax[0].plot(steps[num], '-', linewidth=0.5,color = "C4")
+            ax[0].set_title( "Input: {0}".format(axis_names[num]) )
+            ax[0].set_ylabel( "Axis {0}".format(num) + " , T={0:.2f}".format(T_list[which_temp]), fontsize=12 )
+            ax[0].set_xlabel( "N steps", fontsize=12)
 
-            ax[1].hist(steps[num], bins=int(len(steps[num])/20),
-                 histtype='step', density=True, color = "C1")
-            ax[1].set_xlabel( "Axis %i"%num, fontsize=12 )
-            ax[1].set_ylabel( "PDF", fontsize=12 )
+            ax[1].hist(steps[num], bins= 50, \
+                            histtype='step', density=True, color="C1")
+            ax[1].set_xlabel( "Axis {0}".format(num), fontsize=12 )
+            ax[1].set_ylabel( "Posterior", fontsize=12 )
 
-        fig.subplots_adjust(hspace=0.4)
-        plt.show()
-
-
-
-    def normalize_step(self, step):
-        return step
+        fig.subplots_adjust(hspace=0.45)
+        if save_fig:
+            plt.savefig( "trace_plot_T{0:.0f}.pdf".format(T_list[which_temp]) )
+        if show_fig:
+            plt.show()

@@ -25,12 +25,23 @@ def makehash():
 
 
 class Regressor():
+    """
+    Regressor
+    =========
+
+    Parameters
+    ----------
+
+    ADD DOCS
+    """
 
     def __init__(self, table_data):
-        self.input_dict = table_data.get_regr_input_data() # dict
-        self.output_dict = table_data.get_regr_output_data() # dict
+        self._TableData_ = table_data
 
-        self.regr_dfs_per_class = table_data.get_regr_sorted_output_data() #dict
+        holder = self._TableData_.get_all_regr_data()
+        self.input_dict = holder[0] #_regr_inputs_
+        self.output_dict = holder[1] #_regr_outputs_
+        self.regr_dfs_per_class = holder[2] #_regr_dfs_per_class_
 
         self._regressors_ = makehash()
         self._cv_regressors_ = makehash()
@@ -38,8 +49,38 @@ class Regressor():
         self._log_history_ = makehash()
         self._cv_log_history = makehash()
 
+        self.__train_cross_val = False # update everything
+        self.__all_diffs_holder = makehash()
+        self.__all_Pchange_holder = makehash()
+
+    def train_everything(self, verbose=False):
+        regressor_names = ["rbf", "linear", "gp"]
+        for regr_name in regressor_names:
+            print("Regressor: {0}".format(regr_name))
+            class_keys=list(self.regr_dfs_per_class.keys())
+            for class_name in class_keys:
+                self.train(regr_name, [class_name], None, verbose=verbose)
+
+
     def train(self, regressor_name, class_keys, col_keys, di = None, verbose = False, train_cross_val = False ):
+
+        """Train a regression algorithm.
+
+        Can choose mutliple classes / columns at once as long as
+        they have the same columns.
+
+        if col_keys is None then it trains on all columns in one class.
+        """
         regressor_key = self.get_regressor_name_to_key(regressor_name)
+
+        if col_keys is None:
+            first_class_data = self.regr_dfs_per_class[class_keys[0]]
+            if isinstance(first_class_data, pd.DataFrame):
+                col_keys = np.array( first_class_data.keys() )
+                print("Training on all {0} columns in {1}.".format(len(col_keys),class_keys[0]) )
+            else:
+                print("No regression data for {0}.".format(class_keys[0]))
+                return
 
         if   regressor_key == "LinearNDInterpolator":
             regr_holder = self.fit_linear_ND_interpolator( class_keys, col_keys, data_interval = di, verbose = verbose )
@@ -48,7 +89,7 @@ class Regressor():
         elif regressor_key == "GaussianProcessRegressor":
             regr_holder = self.fit_gaussian_process_regressor( class_keys, col_keys, data_interval = di, verbose = verbose )
         else:
-            print("No trainers with name %s"%regressor_name)
+            print("No trainers with name {0}".format(regressor_name))
             return
 
         for class_key, class_dict in regr_holder.items():
@@ -62,6 +103,7 @@ class Regressor():
 
         if verbose:
             print("\tEXIT TRAIN\n")
+        return
 
 
     def fit_linear_ND_interpolator(self, class_keys, col_keys, data_interval = None, verbose = False):
@@ -144,6 +186,7 @@ class Regressor():
 
         return regressor_holder
 
+
     def fit_gaussian_process_regressor(self, class_keys, col_keys, data_interval = None, verbose = False):
         """ Ok so this is gonna create a dict sorted by class and each
         element is then another dict with the column names mapping to
@@ -153,7 +196,7 @@ class Regressor():
 
         start_time = time.time()
 
-        n_restarts = 2
+        n_restarts = 3
 
         regressor_holder = dict()
 
@@ -176,7 +219,11 @@ class Regressor():
                 if verbose:
                     print("%s: %s - %.0f training points"%( class_key, col_key, len(training_x)) )
 
-                kernel = C( 1e3, (1e2, 5e4) ) * RBF( [ 10, 500, 300.], [(1e0,1e3), (1e0,1e3), (1e-1, 5e3)] )
+                num_dim = len(training_x[0])
+                starting_loc = [1 for i in range(num_dim)]
+                axis_range = axis_ranges = [ (1e-3,1e3) for i in range(num_dim) ]
+                #kernel = C( 1e3, (1e2, 5e4) ) * RBF( [ 10, 500, 300.], [(1e0,1e3), (1e0,1e3), (1e-1, 5e3)] )
+                kernel = gp.kernels.RBF( starting_loc, axis_ranges )
                 gpr = gp.GaussianProcessRegressor( kernel=kernel, n_restarts_optimizer = n_restarts )
 
                 #print("PRE-fit params:\n", gpr.kernel.get_params() ) # helpful for kernel things
@@ -242,14 +289,15 @@ class Regressor():
                 pred, sigma = interp.predict(test_input, return_std = True)
             else:
                 pred = interp.predict(test_input)
-        else:
+        elif regressor_key == "LinearNDInterpolator":
             pred = interp( test_input )
+        else:
+            print("Name not recognized: {0}".format(regressor_name))
 
         if return_std:
             return np.array(pred), np.array(sigma)
         else:
             return np.array(pred)
-
 
 
     def get_regressor_name_to_key(self, name):
@@ -266,13 +314,16 @@ class Regressor():
         return key
 
 
-
+    def get_structure(arg):
+        pass
 
     def make_cross_val_data(self, class_key, col_key, alpha):
         """Randomly sample the data set and seperate training and test data.
 
         Parameters
         ----------
+        class_key :
+        col_key :
         alpha : float
             Fraction of data set to use for training. (0.05 = 5% of data set)
 
@@ -316,14 +367,14 @@ class Regressor():
         self.cross_val_test_input_data = (self.input_dict[class_key].to_numpy(float))[test_int_vals,:]
         self.cross_val_test_output_data = (self.regr_dfs_per_class[class_key][col_key].to_numpy(float))[test_int_vals]
 
-        return train_rnd_int_vals
-
+        return train_rnd_int_vals, test_int_vals
 
 
     def cross_validate(self, regressor_name, class_key, col_key, alpha, verbose = False):
-        """This is not really cross validation - simply differences"""
+        """This is not really cross validation - taking differences"""
+        self.__train_cross_val = True
 
-        train_data_indicies = self.make_cross_val_data( class_key, col_key, alpha )
+        train_data_indicies, test_data_indicies = self.make_cross_val_data( class_key, col_key, alpha )
 
         if verbose:
             print("alpha: %f, num_training_points %.0f"%(alpha, len(train_data_indicies)) )
@@ -373,9 +424,27 @@ class Regressor():
         else:
             percent_diffs = (diffs / self.cross_val_test_output_data) * 100
 
+        self.__train_cross_val = False
         return percent_diffs, diffs
 
+    #   Get it completley working!!!!!
+    #   Nearest Neighbors differences
+    #       extra_column = (%diff_1+%diff_2+%diff_3 +...)/N
+    #   do it in data.py
+    #   interpolate using regressors
+    #   update target distribution (add them)
+    #   - fix Milena's code (day max)
+    #   !!! :D
 
+    def _get_average_diffs(self, regressor_name, class_key, col_key, alpha, verbose = False ):
+        """BROKEN: DO NOT USE"""
+        regressor_key = self.get_regressor_name_to_key(regressor_name)
+        self.__all_diffs_holder[regressor_key][class_key][col_key] = {np.arange(0,Npoints):[]}
+        self.__all_Pchange_holder[regressor_key][class_key][col_key] = {np.arange(0,Npoints):[]}
+        percent_diffs, diffs = self.cross_validate( regressor_name, class_key, col_key, alpha, verbose = verbose)
+
+    def get_avg_diffs(self, regressor_name, class_key, col_key, alpha, verbose = False):
+        return avg_diffs
 
     def mult_diffs(self, regressor_name, class_key, col_keys, alpha, cutoff, verbose = False):
 
@@ -408,12 +477,14 @@ class Regressor():
         return np.array(p_diffs_holder), np.array(attr_holder)
 
 
+    def plot_regr_data(self, class_name):
+        """Plot all regression data from the chosen class.
 
-
-
-
-    def plot_data(self, class_name):
-        """Plot all regression data from the chosen class."""
+        Parameters
+        ----------
+        class_name : str
+            Specify what class data will plotted.
+        """
 
         data_out = self.regr_dfs_per_class[class_name]
         data_in = self.input_dict[class_name]
@@ -421,7 +492,7 @@ class Regressor():
         if isinstance(data_out, pd.DataFrame):
             pass
         else:
-            print("Output for class '%s': %s \nNo valid data to plot."%(class_name, str(data_out)))
+            print("Output for class '{0}': {1} \nNo valid data to plot.".format(class_name, str(data_out)) )
             return
 
         key_in  = np.array(data_in.columns)
@@ -457,10 +528,9 @@ class Regressor():
         plt.show()
 
 
-
-
-    def get_rnd_test_inputs(self, class_name, N ):
+    def get_rnd_test_inputs(self, class_name, N, other_rng=dict(), verbose=False):
         """Produce randomly sampled 'test' inputs inside domain of input_data.
+        Input data is seperated by class.
 
         Parameters
         ----------
@@ -468,13 +538,21 @@ class Regressor():
             Class name to specify which input data you want to look at.
         N : int
             Number of test inputs to return.
+        other_rng: dict, optional
+            Change the range of random sampling in desired axis. By default,
+            the sampling is done in the range of the training data.
+            The axis is specified with an integer key and the value
+            is a list specifying the range. {1:[min, max]}
+        verbose: bool, optional
+            Print diagnostic information. (default False)
 
         Returns
         -------
         rnd_test_points : ndarray
-            ndarray with the same shape as the input data.
+            Test points randomly sampled in the range of the training data
+            in each axis unless otherwise specified in 'other_rng'.
+            Has the same shape as input data from TableData.
         """
-        # ++ could add ability to specify rng of axis
 
         num_axis = len( self.input_dict[class_name].values[0])
 
@@ -486,7 +564,15 @@ class Regressor():
         # sample N points between max & min in each axis
         axis_rnd_points = []
         for i in range(num_axis):
-            r = np.random.uniform( low = a_min[i], high = a_max[i], size = N )
+            if i in other_rng:
+                b_min, b_max = other_rng[i]
+            else:
+                b_min, b_max = a_min[i], a_max[i]
+            if verbose:
+                print("{0} - min: {1}, max: {2}".format(i, b_min, b_max) )
+
+            r = np.random.uniform( low = b_min, high = b_max, size = N )
+
             # this reshape is necessary to concatenate
             axis_rnd_points.append( r[:,np.newaxis] )
 
