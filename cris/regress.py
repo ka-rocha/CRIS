@@ -53,17 +53,19 @@ class Regressor():
         self.__all_diffs_holder = makehash()
         self.__all_Pchange_holder = makehash()
 
-    def train_everything(self, verbose=False):
-        regressor_names = ["rbf", "linear", "gp"]
+    def train_everything(self, regressor_names, verbose=False):
+        """Train all classes and columns with the specified list of regressor names."""
         for regr_name in regressor_names:
-            print("Regressor: {0}".format(regr_name))
+            if verbose:
+                print("Regressor: {0}".format(regr_name))
             class_keys=list(self.regr_dfs_per_class.keys())
             for class_name in class_keys:
                 self.train(regr_name, [class_name], None, verbose=verbose)
+        if verbose:
+            print("\nDone Regrssor train_everything.")
 
 
     def train(self, regressor_name, class_keys, col_keys, di = None, verbose = False, train_cross_val = False ):
-
         """Train a regression algorithm.
 
         Can choose mutliple classes / columns at once as long as
@@ -77,9 +79,11 @@ class Regressor():
             first_class_data = self.regr_dfs_per_class[class_keys[0]]
             if isinstance(first_class_data, pd.DataFrame):
                 col_keys = np.array( first_class_data.keys() )
-                print("Training on all {0} columns in {1}.".format(len(col_keys),class_keys[0]) )
+                if verbose:
+                    print("\t Training on all {0} columns in '{1}'...".format(len(col_keys),class_keys[0]) )
             else:
-                print("No regression data for {0}.".format(class_keys[0]))
+                if verbose:
+                    print("No regression data for {0}.".format(class_keys[0]))
                 return
 
         if   regressor_key == "LinearNDInterpolator":
@@ -442,9 +446,6 @@ class Regressor():
         self.__all_diffs_holder[regressor_key][class_key][col_key] = {np.arange(0,Npoints):[]}
         self.__all_Pchange_holder[regressor_key][class_key][col_key] = {np.arange(0,Npoints):[]}
         percent_diffs, diffs = self.cross_validate( regressor_name, class_key, col_key, alpha, verbose = verbose)
-
-    def get_avg_diffs(self, regressor_name, class_key, col_key, alpha, verbose = False):
-        return avg_diffs
 
     def mult_diffs(self, regressor_name, class_key, col_keys, alpha, cutoff, verbose = False):
 

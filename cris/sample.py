@@ -9,22 +9,26 @@ import scipy.stats
 class Sampler():
     """Add some docstrings"""
 
-    def __init__( self, classifier, regressor = None ):
+    def __init__( self, classifier = None, regressor = None ):
         self._Classifier_ = classifier
         self._Regressor_ = regressor
 
-        # Find the bounds of the walker - should be TableData attribute
-        self.max_vals = []
-        self.min_vals = []
-        input_data_cols = self._Classifier_.table_data.get_input_data().T
-        for data in input_data_cols:
-            self.max_vals.append(max(data))
-            self.min_vals.append(min(data))
-        # self._max_vals_, self._min_vals_ = self._Classifier_.get_data_bounds()
+        if self._Classifier_ is None:
+            pass
+        else:
+            # Find the bounds of the walker - should be TableData attribute
+            self.max_vals = []
+            self.min_vals = []
+            input_data_cols = self._Classifier_._TableData_.get_data(what_data='input').T
+            for data in input_data_cols:
+                self.max_vals.append(max(data))
+                self.min_vals.append(min(data))
+            # self._max_vals_, self._min_vals_ = self._Classifier_.get_data_bounds()
 
         # You can save chains_history in here
         self._chain_step_hist_holder_ = dict()
 
+        self._MAX_APC_str_ = []
 
     def analytic_target_dist( self, name, args ):
         """For testing."""
@@ -33,25 +37,58 @@ class Sampler():
         arg2 = - 8*mu**2 - 8*( nu - 2 )**2
         return (16)/(3*np.pi) * ( np.exp(arg1) + 0.5*np.exp(arg2) )
 
-    def classifier_target_dist( self, classifier_name, args  ):
+    def classifier_target_dist( self, classifier_name, args, other_args=None ):
         """Target distribution using classification only."""
-        correct_shape_args = np.array( [args] )
-        max_probs, nan_locs = self._Classifier_.return_probs( classifier_name, correct_shape_args, \
+        if other_args is None:
+            correct_shape_args = np.array( [args] )
+        else:
+            correct_shape_args = other_args
+
+        normalized_probs, where_not_nan = self._Classifier_.return_probs( classifier_name, correct_shape_args, \
                                                               verbose=False )
-        if len(nan_locs) > 0:
+
+        max_probs = np.max(normalized_probs, axis=1)
+        if (len(where_not_nan) != len(max_probs)):
             return 0
         else:
             return (1-max_probs)
 
-    def cls_rgr_target_dist(self, names, args):
+    def cls_rgr_target_dist(self, names, args, other_args = None):
         """This isn't even a function in regressor, this is what we need to do"""
-        correct_shape_args = np.array( [args] )
-        max_probs, nan_locs = self._Classifier_.return_probs( names[0], correct_shape_args, all_probs=False )
-        # The second return of return_probs is a list filled with nan_locations
-        if len(nan_locs) > 0:
+        if other_args is None:
+            correct_shape_args = np.array( [args] )
+        else:
+            correct_shape_args = other_args
+
+        normalized_probs, where_not_nan = self._Classifier_.return_probs( names[0], correct_shape_args, \
+                                                              verbose=False )
+        max_probs = np.max(normalized_probs, axis=1)
+        pred_class_id = np.argmax(normalized_probs[0])
+        cls_key = self._Classifier_.class_id_mapping[ pred_class_id ]
+
+        if (len(where_not_nan) != len(max_probs)):
             return 0
-        #regr_error, nan_locs = self._Regressor_.return_errors( names[1], correct_shape_args )
-        return 0
+        else:
+            if isinstance(self._Regressor_.regr_dfs_per_class[cls_key], pd.DataFrame):
+                pass
+            else:
+                # nan value, do nothing
+                return (1-max_probs) + 0
+
+            this_class_regr_cols = self._Regressor_.regr_dfs_per_class[cls_key].keys()
+            good_col_keys = [i for i in this_class_regr_cols if "APC" in i] # columns with average percent change data
+
+            predictions = self._Regressor_.get_predictions( [names[1]], [cls_key], good_col_keys, correct_shape_args  )
+            regr_key = self._Regressor_.get_regressor_name_to_key(names[1])
+
+            dict_with_APC_data = predictions[regr_key][cls_key]
+            max_APC_vals = [i[0] for i in dict_with_APC_data.values()]
+            max_APC = np.max(max_APC_vals)
+            which_col_max = list(dict_with_APC_data.keys())[np.argmax(max_APC_vals)]
+
+            self._MAX_APC_str_.append(which_col_max)
+
+            return (1-max_probs) + max_APC
 
 
     def save_chain_step_history(self, key, chain_step_history, overwrite=False):
@@ -129,7 +166,7 @@ class Sampler():
         acc_ratio_holder = np.zeros( num_chains )
 
         start_time = time.time()
-        for k in range(N_loops):
+        for counter in range(N_loops):
             # Number of draws before swap
             N_draws = N_draws_per_swap
 
@@ -154,7 +191,7 @@ class Sampler():
 
             if verbose:
                 #print( "acc/total: {0}".format(acc_ratio_holder[0]), end="\r" )
-                b = "num_acc/total: Tmax {0:.4}, Tmin {1:.4}, k {2}".format( acc_ratio_holder[0], acc_ratio_holder[-1], k )
+                b = "num_acc/total: Tmax {0:.4}, Tmin {1:.4}, loop # {2}".format( acc_ratio_holder[0], acc_ratio_holder[-1], counter )
                 sys.stdout.write('\r'+b)
 
             # Calc H to see if chains SWAP
@@ -445,7 +482,7 @@ class Sampler():
         fig, axs = plt.subplots(nrows=n_axis, ncols=2, \
                                        figsize=(10,5), dpi=100, \
                                        gridspec_kw={'width_ratios':[1.8, 1]})
-        axis_names = self._Classifier_.table_data.get_input_data(return_df=True).keys()
+        axis_names = self._Classifier_._TableData_.get_data(what_data='input',return_df=True).keys()
         for num, ax in enumerate(axs):
             ax[0].plot(steps[num], '-', linewidth=0.5,color = "C4")
             ax[0].set_title( "Input: {0}".format(axis_names[num]) )

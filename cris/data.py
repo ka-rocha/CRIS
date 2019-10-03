@@ -17,7 +17,7 @@ def calc_avg_dist(data, n_neighbors, neighbor=None):
     ------
     data : ndarray
         Data to train the NearestNeighbors class on.
-    n_neighbors : int, list
+    n_neighbors : int
         Number of neighbors to use when finding average distance.
     neighbor : instance of NearestNeightbors class
         For passing your own object.
@@ -26,6 +26,8 @@ def calc_avg_dist(data, n_neighbors, neighbor=None):
     -------
     avg_dist : array
         The average distance between nearest neighbors.
+    g_indi : array
+        Indicies that correspond to the nearest neighbors.
     """
     if neighbor:
         neigh = neighbor
@@ -33,34 +35,38 @@ def calc_avg_dist(data, n_neighbors, neighbor=None):
         neigh = NearestNeighbors()
     neigh.fit(data)
 
-    if isinstance(n_neighbors, int):
-        # since we pass the original data, the first nearest point is itself
-        # if we want 2 nearest neighbors, we ask for 3 because the first will always be 0
-        dist, indicies = neigh.kneighbors( data, n_neighbors=(n_neighbors+1) )
+    # since we pass the original data, the first nearest point is itself
+    # if we want 2 nearest neighbors, we ask for 3 because the first will always be 0
+    dist, indicies = neigh.kneighbors( data, n_neighbors=(n_neighbors+1) )
 
-        g_dist = (dist.T[1:len(dist)]).T
-        g_indi = (indicies.T[1:len(indicies)]).T
-        avg_dist =  np.mean(g_dist, axis = 1)
-    else:
-        avg_dist_list = []
-        for n in n_neighbors:
-            dist, indicies = neigh.kneighbors( data, n_neighbors=(n+1) )
+    g_dist = (dist.T[1:len(dist)]).T
+    g_indi = (indicies.T[1:len(indicies)]).T
+    avg_dist =  np.mean(g_dist, axis = 1)
 
-            g_dist = (dist.T[1:len(dist)]).T
-            g_indi = (indicies.T[1:len(indicies)]).T
-            avg_dist =  np.mean(g_dist, axis = 1)
-            avg_dist_list.append(avg_dist)
-        avg_dist = np.array( avg_dist_list )
-    return avg_dist
+    return avg_dist, g_indi
 
 
-def calc_avg_p_change( data, avg_dist ):
+def calc_avg_p_change( data, where_nearest_neighbors ):
     where_zero = np.where(data==0)[0]
     if len(where_zero)>0:
         return None
     else:
-        avg_p_change = abs(avg_dist-data)/data
-        return avg_p_change
+        pass
+
+    avg_p_change_holder = []
+    for n_, indicies in where_nearest_neighbors.items():
+        diff_holder = []
+        for i in range(n_):
+            nearest_data = data[ indicies.T[i] ]
+            diff_holder.append( data - nearest_data )
+
+        diffs = np.array(diff_holder).T
+        avg_diffs = np.mean( diffs, axis=1 )
+        avg_p_change = abs(avg_diffs)/data
+
+        avg_p_change_holder.append( avg_p_change )
+
+    return np.array( avg_p_change_holder )
 
 class TableData():
     """
@@ -298,18 +304,24 @@ class TableData():
         self._n_neighbors_ = [int(i) for i in n_neighbors]
         self._avg_dist_dfs_per_class_ = dict() # stores the average distances
 
-        for key, val in self._regr_dfs_per_class_.items():
-            # key is the class, val is another dataframe or np.nan
+        # We need distances in input space, then compare %diff in output space
+        for key, val in self._regr_inputs_.items():
+            # key is the class, val is input DataFrame or np.nan
             self._avg_dist_dfs_per_class_[key] = dict()
+            regr_data = self._regr_dfs_per_class_[key]
 
-            if isinstance(val, pd.DataFrame):
+            if isinstance(regr_data, pd.DataFrame):
                 self.__vb_helper(verbose, "class: '{0}'".format(key))
 
-                for _key, _val in val.items():
-                    data = np.array(_val.values, dtype=float)
-                    correct_shape = data[np.newaxis,:].T
-                    avg_dist = calc_avg_dist( correct_shape, self._n_neighbors_, neighbor=neighbor )
+                # find nearest neighbors in input space
+                where_nearest_neighbors = dict()
+                for n_ in self._n_neighbors_:
+                    avg_dist, indicies = calc_avg_dist(val.values, n_, neighbor=neighbor)
+                    where_nearest_neighbors[n_] = indicies
 
+
+                for _key, _val in regr_data.items(): # regression data
+                    data = np.array(_val.values, dtype=float)
                     where_zero = np.where(data==0)[0]
                     if len(where_zero)>0:
                         info_str_15 = "\t -- {0} zeros in '{1}'. Skipping p_change...".format(len(where_zero),_key)
@@ -317,7 +329,7 @@ class TableData():
                         pass
                     else:
                         # Take percent difference
-                        avg_p_change = calc_avg_p_change( data, avg_dist )
+                        avg_p_change = calc_avg_p_change( data, where_nearest_neighbors )
                         if avg_p_change is None:
                             self.__vb_helper(verbose, "None in avg_p_change!? Should not happen...")
                         else:

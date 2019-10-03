@@ -56,6 +56,9 @@ class Classifier():
 
         self.__train_cross_val = False
 
+    def train_everything(self, classifier_names, verbose=False):
+        for cls_name in classifier_names:
+            self.train(cls_name, verbose=verbose)
 
     def train(self, classifier_name, di = None, verbose = False ):
         """Train a classifier.
