@@ -6,6 +6,12 @@ import sys
 
 import scipy.stats
 
+# make func_call( fname, Npoints) to run everything
+# talk to scotty about installing CIRS on quest
+# give Monica access / make code public, either one
+# extra: something saying one extra point is not near other currently running point
+#        maybe also include check that it's not already in a grid cell that has a simulation
+
 class Sampler():
     """Add some docstrings"""
 
@@ -54,7 +60,7 @@ class Sampler():
             return (1-max_probs)
 
     def cls_rgr_target_dist(self, names, args, other_args = None):
-        """This isn't even a function in regressor, this is what we need to do"""
+        """Use classification & regression."""
         if other_args is None:
             correct_shape_args = np.array( [args] )
         else:
@@ -110,11 +116,10 @@ class Sampler():
 
 
     def run_PTMCMC( self, T_max, N_tot, init_pos, target_dist, classifier_name, \
-                    N_draws_per_swap = 3, c_spacing = 1.2, alpha = 1, \
-                    upper_limit_reject = 1e5, verbose = False ):
-        """Runs a Paralel Tempered MCMC.
-
-        # TODO: UPDATE THESE DOCS
+                    N_draws_per_swap=3, c_spacing=1.2, alpha=1.0, \
+                    upper_limit_reject=1e5, verbose=False ):
+        """Runs a Paralel Tempered MCMC with a user specified target distribution.
+        Calls the method run_MCMC.
 
         Parameters
         ----------
@@ -122,12 +127,26 @@ class Sampler():
             Sets the maximum temperature MCMC in the chain.
         N_tot : int
             The total number of iterations for the PTMCMC.
+        init_pos : array
+            Initial position of walkers in each axis.
         target_dist : callable,  f( name, element of step_history )
             The target distribution to sample.
             The 'name' argument specifies the classifier interpolator to use.
             (A 2D analytic function is provided - analytic_target_dist)
-        N_draws_per_swap : int, default 3
-            Number of draws to perform for each MCMC before swap proposals.
+        classifier_name : str, list
+            A single string or list of strings specifying the interpolator to use
+            for classification or classification and regression respectively.
+        N_draws_per_swap : int, optional
+            Number of draws to perform for each MCMC before swap proposals. (default 3)
+        c_spacing : float, optional
+            Sets the spacing of temperatures in each chain. (default 1.2)
+            T_{i+1} = T_{i}^{1/c}, range: [T_max , T=1]
+        alpha : float, optional
+            Sets the standard deviation of steps taken by the walkers.
+        upper_limit_reject : float, optional
+            Sets the upper limit of rejected points. (default 1e5)
+        verbose : bool, optional
+            Useful print statements during execution. (default False)
 
         Returns
         -------
@@ -136,11 +155,15 @@ class Sampler():
             from 0 (max T) to the total number of chains -1 (min T).
         T_list : array
             Array filled with the temperatures of each chain from max to min.
+
+        Notes
+        -----
+        There is a prior on the PTMCMC which is to not go outside the range of
+        training data in each axis.
          """
-        # Create list of Temperatures - T_i+1 = T_i ^c
-        # T_max -> T=1
+        # create list of Temperatures: T_{i+1} = T_{i}^{1/c}, range: [T_max , T=1]
         T_list = [T_max]
-        while T_list[-1] > 1.3:
+        while (T_list[-1] > 1.3):
             T_list.append( T_list[-1]**(1/c_spacing) )
         T_list.append(1)
         T_list = np.array(T_list)
@@ -148,9 +171,9 @@ class Sampler():
         num_chains = len(T_list)
         if verbose:
             print("Num chains: {0}".format(num_chains) )
-            print("Temperatures: {0}".format(T_list) )
+            print("Temperatures: {0}\n".format(T_list) )
 
-        # plotting
+        # data storage
         chain_holder = dict()
         for i in range( len(T_list) ):
             chain_holder[i] = []
@@ -158,6 +181,8 @@ class Sampler():
         N_loops = int( N_tot/N_draws_per_swap )
 
         # Initial conditions for all links in chain
+        # ADD: init_pos can be a unitless position in the range of the axes of the data
+        #       This change should also be applied to alpha - user just gives num(0,1]
         this_iter_step_loc = [init_pos]*num_chains
 
         # Accept ratio tracker
@@ -186,12 +211,17 @@ class Sampler():
                 total_rej[i] += rej
                 acc_ratio_holder[i] = total_acc[i]/(total_acc[i] + total_rej[i])
 
-                # plotting data
+                # data storage
                 chain_holder[i].append( np.array(steps)  )
 
             if verbose:
-                #print( "acc/total: {0}".format(acc_ratio_holder[0]), end="\r" )
-                b = "num_acc/total: Tmax {0:.4}, Tmin {1:.4}, loop # {2}".format( acc_ratio_holder[0], acc_ratio_holder[-1], counter )
+                # useful output during the PTMCMC
+                num_bars = 20
+                how_close = ( int( (counter/(N_loops-1))*num_bars ) )
+                progress_bar = "|" + how_close*"=" + ">" + abs(num_bars-how_close)*" " + "|" \
+                                + "{0:.1f}%".format( counter/(N_loops-1) * 100)
+                b = "num_acc/total: Tmax {0:.4f}, Tmin {1:.4f}, loop # {2}, {3}".format( \
+                        acc_ratio_holder[0], acc_ratio_holder[-1], counter, progress_bar )
                 sys.stdout.write('\r'+b)
 
             # Calc H to see if chains SWAP
@@ -205,11 +235,12 @@ class Sampler():
                 bot = (target_dist( classifier_name, args_i ))**(1/T_list[i]) * \
                       (target_dist( classifier_name, args_i_1 ))**(1/T_list[i+1])
 
-                try:
-                    ratio = top/bot
-                except:
-                    # can get div by 0 errors when using linear because of nans
+                # can get div 0 errors when using linear because of nans
+                if (bot == 0):
                     ratio = 0
+                else:
+                    ratio = top/bot
+
                 # inter-chain transition probability
                 H = min( 1 , ratio )
 
@@ -303,10 +334,10 @@ class Sampler():
                 else:
                     trial_val = 0 # essential reject points outside of range
 
-            try:
-                ratio = trial_val/val
-            except ZeroDivisionError:
+            if (val == 0): # avoid div 0 errors
                 ratio = 0
+            else:
+                ratio = trial_val/val
 
             accept_prob = min( 1, (ratio)**(1/T) )
 
@@ -327,6 +358,7 @@ class Sampler():
         for j, steps_in_axis in enumerate(step_history.T):
             normed_steps.T[j] = (steps_in_axis - self.min_vals[j])/(self.max_vals[j]-self.min_vals[j])
         return normed_steps
+
 
     def undo_normalize_step_history(self, normed_steps):
         """Takes normed steps from [0,1] and returns their value
@@ -404,7 +436,7 @@ class Sampler():
                     # instead of checking each individual point keeping all mvns
                     # seperate, we want to add them together and get upper bound
                     # IF we do this we need to change the MVN to not be normalized !!!!
-                    # THE UNORMALIZED MVN THING IS NOT IMPLEMENTED
+                    # THE UNORMALIZED MVN IS NOT IMPLEMENTED
                     total_chance_above_distr = rnd_chance > np.sum(distr_holder)
                 else:
                     total_chance_above_distr = np.sum( rnd_chance > distr_holder )
@@ -442,34 +474,91 @@ class Sampler():
         return np.array(accepted_points), np.array(rejected_points), np.array(accepted_sigmas)
 
 
-
     def get_proposed_points( self, step_history, N_points, Kappa, \
                              shuffle = False, norm_steps = False, \
                              add_mvns_together = False, \
-                             var_mult = None, verbose = False ):
-        """wrapper for multiple calls to the density"""
+                             var_mult = None, seed=None, verbose = False ):
+        """The desnity logic is not deterministic so, multiple iterations
+        may be needed to converge on a desired number of proposed points.
+        This method performs multiple class to do_density_logic while
+        changing Kappa in order to return the desired number of points.
 
-        acc_pts, rej_pts, acc_sigmas = self.do_density_logic( step_history, N_points, Kappa, \
-                                                    norm_steps = norm_steps, \
-                                                    var_mult = var_mult, \
-                                                    shuffle = shuffle, \
-                                                    add_mvns_together = add_mvns_together, \
-                                                    verbose = verbose )
+        Parameters
+        ----------
+        step_history : ndarray
+        N_points : int
+        Kappa : float
+        shuffle : bool, optional
+        norm_steps : bool, optional
+        add_mvns_together : bool, optional
+        var_mult : ndarray, optional
+        seed : float, optional
+        verbose : bool, optional
+
+        Returns
+        -------
+        acc_pts : ndarray
+            Array of proposed points to be used as initial
+            conditions in new simulations.
+        Kappa : float
+            Scaling factor which reproduced the desired number
+            of accepted points.
+
+        Notes
+        -----
+        Will automatically exit if it goes through 1000 iterations
+        without converging on the desired number of points.
+        """
+
+        if seed is None:
+            pass
+        else:
+            numpy.random.seed(seed = seed)
+            print("Setting seed: {0}".format(seed))
+
+        if verbose: print("Converging to {0} points.".format(N_points))
+
+        acc_pts = []
+        iters = 0
+        max_iters = 1e3
+        while (len(acc_pts) != N_points and iters < max_iters):
+
+            acc_pts, rej_pts, acc_sigmas = self.do_density_logic( step_history, N_points, Kappa, \
+                                                        norm_steps = norm_steps, \
+                                                        var_mult = var_mult, \
+                                                        shuffle = shuffle, \
+                                                        add_mvns_together = add_mvns_together, \
+                                                        verbose = verbose )
+            if verbose:
+                print( "\t acc_pts: {0}, Kappa = {1:.3f}".format(len(acc_pts), Kappa) )
+
+            diff = abs( len(acc_pts) - N_points )
+            if len(acc_pts) > N_points:
+                Kappa = Kappa * (1 + 0.01*diff) # increase prop to difference
+            elif len(acc_pts) < N_points:
+                Kappa = Kappa * (1 - 0.01*diff) # decrease prop to difference
+            else:
+                pass
+            iters += 1
+
+        if (iters == max_iters): print("Reached max iters before converging!")
+        if verbose: print("\nFinal Kappa = {0}\n".format(Kappa))
+
         # plot of the little mvns maybe???
-        self.make_prop_points_plots(acc_pts)
-        return acc_pts
+        self.make_prop_points_plots(acc_pts) # doesn't work yet
+
+        return acc_pts, Kappa
 
 
     def make_prop_points_plots(self, prop_points, show_fig = True, save_fig=False ):
-        """If your inputs are 2d then we can plot them like this."""
+        """If your inputs are 2d then we can plot them like this.
+        THIS METHOD DOES NOTHING. """
         return None
-
-
 
 
     def make_trace_plot( self, chain_holder, T_list, Temp, save_fig=False, show_fig=True ):
         """Make a trace plot of the position of a sampler in an axis vs step number.
-        This function makes titles assumes you are using the data from classifier."""
+        This function makes titles assuming you are using the data from classifier."""
 
         if show_fig == False and save_fig == False:
             return
@@ -478,11 +567,13 @@ class Sampler():
 
         n_axis = len(chain_holder[which_temp].T)
         steps = chain_holder[which_temp].T
+        axis_names = self._Classifier_._TableData_.get_data(what_data='input',return_df=True).keys()
+
 
         fig, axs = plt.subplots(nrows=n_axis, ncols=2, \
-                                       figsize=(10,5), dpi=100, \
+                                       figsize=(10, 2.5*n_axis), dpi=100, \
                                        gridspec_kw={'width_ratios':[1.8, 1]})
-        axis_names = self._Classifier_._TableData_.get_data(what_data='input',return_df=True).keys()
+
         for num, ax in enumerate(axs):
             ax[0].plot(steps[num], '-', linewidth=0.5,color = "C4")
             ax[0].set_title( "Input: {0}".format(axis_names[num]) )

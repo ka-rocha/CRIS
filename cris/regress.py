@@ -318,8 +318,9 @@ class Regressor():
         return key
 
 
-    def get_structure(arg):
-        pass
+    # def get_structure(arg):
+    #     pass
+
 
     def make_cross_val_data(self, class_key, col_key, alpha):
         """Randomly sample the data set and seperate training and test data.
@@ -440,12 +441,49 @@ class Regressor():
     #   - fix Milena's code (day max)
     #   !!! :D
 
-    def _get_average_diffs(self, regressor_name, class_key, col_key, alpha, verbose = False ):
-        """BROKEN: DO NOT USE"""
+    def get_frac_diffs(self, regressor_name, class_key, args, which_cols=None, verbose=False ):
+        """Get desired fractional differences calculated in DataFrame object.
+
+        # TODO: finish this method
+
+        Parameters
+        ----------
+        regressor_name : str
+            Name of regression method to use for interpolating between differences
+            data.
+        class_key : str
+            Key corresponding to a unique class from the data set.
+        which_cols : list, optional
+            List of substrings which pick out columns used for differences.
+        verbose : bool, optional
+
+        Returns
+        -------
+
+        """
         regressor_key = self.get_regressor_name_to_key(regressor_name)
-        self.__all_diffs_holder[regressor_key][class_key][col_key] = {np.arange(0,Npoints):[]}
-        self.__all_Pchange_holder[regressor_key][class_key][col_key] = {np.arange(0,Npoints):[]}
-        percent_diffs, diffs = self.cross_validate( regressor_name, class_key, col_key, alpha, verbose = verbose)
+
+        if isinstance(self.regr_dfs_per_class[class_key], pd.DataFrame):
+            all_apc_keys = [i for i in self.regr_dfs_per_class[class_key].keys() if "APC" in i]
+            all_prefixes = np.array([i.split("_", 2) for i in all_apc_keys])
+            unique_prefix = np.unique(all_prefixes.T[0])
+
+            if which_cols is None:
+                good_col_keys = all_apc_keys
+            else:
+                for sub_str in which_cols:
+                    good_col_keys = [i for i in all_apc_keys if sub_str in i]
+
+            correct_shape_args = np.array([args])
+            predictions = self.get_predictions( [regressor_key], [class_key], good_col_keys, correct_shape_args  )
+            return None
+
+        else:
+            # nan value, return zero
+            return 0
+
+        all_cols = self.regr_dfs_per_class[regressor_key]
+
 
     def mult_diffs(self, regressor_name, class_key, col_keys, alpha, cutoff, verbose = False):
 

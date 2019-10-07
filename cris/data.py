@@ -167,7 +167,8 @@ class TableData():
 
         # _df_index_keys_ setting index of Nth file the data is from with 'dfN'.
         self._full_data_ = pd.concat( self._df_list_, join='outer',
-                                      ignore_index=False, keys=self._df_index_keys_)
+                                      ignore_index=False, keys=self._df_index_keys_,\
+                                      sort=True)
 
         # remove rows and columns with unwanted data
         if omit_vals is not None:
@@ -618,6 +619,9 @@ class TableData():
         """
         full_data = self._full_data_
         input_data = self._input_
+
+        if len(input_data) == 2:
+            print("2D data")
 
         if axes:
             first_axis, second_axis, third_axis = axes
