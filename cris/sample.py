@@ -403,6 +403,15 @@ class Sampler():
             print( "var_mult: {0}".format(var_mult) ) # variance multiplier
             print( "Kappa: {0}".format(Kappa) ) # multiplier of average variance
 
+        # if acc_pts is None:
+        #     accepted_points = []
+        # elif isinstance(acc_pts, str):
+        #     accepted_points = np.loadtxt( acc_pts )
+        # elif isinstance(acc_pts, np.array):
+        #     accepted_points = list(acc_pts)
+        # else:
+        #     accepted_points = []
+
         accepted_points = []
         accepted_sigmas = []
         max_val_holder = []
