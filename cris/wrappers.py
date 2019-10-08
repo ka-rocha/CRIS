@@ -5,7 +5,29 @@ import sample
 
 
 def populate_parameter_space( file_path, N_new_points=1 ):
+    """For a given set of training data, propose new simulations
+    in parameter space based off the CRIS sampling algorithm.
 
+    A PTMCMC with a target distribution: (1-P(class))+max(frac_diff_in_regr)
+
+    Parameters
+    ----------
+    file_path : str, list
+        String or list of strings with file paths to training
+        data for the TableData class.
+    N_new_points : int, optional
+        Number of new points to propose. If 1 (default) then
+        the last position in the PTMCMC is given. If more than
+        one, proposed points are based off of density logic.
+        (see method 'get_proposed_points' in Sampler class)
+
+    Returns
+    -------
+    prop_points : ndarray
+        Array containing the proposed simulation points.
+        Each element is a ND vector with dimensionality given
+        by the input data.
+    """
     if isinstance(file_path, list):
         files = file_path
     else:
@@ -41,6 +63,6 @@ def populate_parameter_space( file_path, N_new_points=1 ):
     if N_new_points == 1:
         return np.array([chain_holder[len(T_list)-1][-1]])
     else:
-        prop_points = sampler_obj.get_proposed_points(chain_holder[8], N_new_points, 10, \
-                                                        verbose = True)
+        prop_points, Kappa = sampler_obj.get_proposed_points(chain_holder[8], N_new_points, 10, \
+                                                                verbose = True)
         return prop_points

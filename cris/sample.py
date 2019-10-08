@@ -537,7 +537,7 @@ class Sampler():
                                                         var_mult = var_mult, \
                                                         shuffle = shuffle, \
                                                         add_mvns_together = add_mvns_together, \
-                                                        verbose = verbose )
+                                                        verbose = False )
             if verbose:
                 print( "\t acc_pts: {0}, Kappa = {1:.3f}".format(len(acc_pts), Kappa) )
 
