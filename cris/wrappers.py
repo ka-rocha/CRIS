@@ -1,7 +1,13 @@
-import data
-import classify
-import regress
-import sample
+from . import data
+from . import classify
+from . import regress
+from . import sample
+
+# generally useful imports
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+import time
 
 
 def populate_parameter_space( file_path, N_new_points=1, **kwargs ):

@@ -28,9 +28,3 @@ __credits__ = ['Scott Coughlin <scottcoughlin2014@u.northwestern.edu>',
                 'Christopher Berry <christopher.berry@northwestern.edu>',
                 'Vicky Kalogera <vicky@northwestern.edu>']
 del get_versions
-
-# generally useful imports
-import numpy as np
-import matplotlib.pyplot as plt
-import pandas as pd
-import time
