@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# Copyright (C) Katie Breivik (2017)
+# Copyright (C) Katie Breivik (2017) OLD FROM COSMIC
 #
 # This file is part of cris
 #
@@ -22,6 +22,15 @@
 
 from ._version import get_versions
 __version__ = get_versions()['version']
-__author__ = 'Kyle Rocha <YOUR EMAIL>'
-__credits__ = ['Scott Coughlin <scottcoughlin2014@u.northwestern.edu>']
+__author__ = 'Kyle Rocha <kylerocha2024@u.northwestern.edu>'
+__credits__ = ['Scott Coughlin <scottcoughlin2014@u.northwestern.edu>',
+                'Pablo Marchant <pamarca@gmail.com>',
+                'Christopher Berry <christopher.berry@northwestern.edu>',
+                'Vicky Kalogera <vicky@northwestern.edu>']
 del get_versions
+
+# generally useful imports
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+import time

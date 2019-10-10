@@ -117,7 +117,7 @@ class Sampler():
 
     def run_PTMCMC( self, T_max, N_tot, init_pos, target_dist, classifier_name, \
                     N_draws_per_swap=3, c_spacing=1.2, alpha=1.0, \
-                    upper_limit_reject=1e5, verbose=False ):
+                    upper_limit_reject=1e5, verbose=False, trace_plots=False ):
         """Runs a Paralel Tempered MCMC with a user specified target distribution.
         Calls the method run_MCMC.
 
@@ -266,8 +266,9 @@ class Sampler():
             print( "\nLength of chains: \n{0}".format(np.array([len(chain_step_history[i]) for i in range(num_chains)]))  )
             fin_time_s = time.time()-start_time
             print( "Finished in {0:.2f} seconds, {1:.2f} minutes.".format(fin_time_s, fin_time_s/60) )
-            self.make_trace_plot( chain_step_history, T_list, 0, save_fig=False )
-            self.make_trace_plot( chain_step_history, T_list, num_chains-1, save_fig=False )
+            if trace_plots:
+                self.make_trace_plot( chain_step_history, T_list, 0, save_fig=False )
+                self.make_trace_plot( chain_step_history, T_list, num_chains-1, save_fig=False )
 
         return chain_step_history, T_list
 
