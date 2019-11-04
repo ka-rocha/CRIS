@@ -7,7 +7,6 @@ import time
 
 from sklearn.neighbors import NearestNeighbors
 
-
 def calc_avg_dist(data, n_neighbors, neighbor=None):
     """Given data, return the average distance to the
     n_neigh nearest neighbors in the data set.
@@ -67,6 +66,8 @@ def calc_avg_p_change( data, where_nearest_neighbors ):
         avg_p_change_holder.append( avg_p_change )
 
     return np.array( avg_p_change_holder )
+
+
 
 class TableData():
     """
