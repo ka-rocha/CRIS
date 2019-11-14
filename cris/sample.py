@@ -516,7 +516,7 @@ class Sampler():
 
         Notes
         -----
-        Will automatically exit if it goes through 1000 iterations
+        Will automatically exit if it goes through 500 iterations
         without converging on the desired number of points.
         """
 
@@ -530,7 +530,7 @@ class Sampler():
 
         acc_pts = []
         iters = 0
-        max_iters = 1e3
+        max_iters = 5e2
         while (len(acc_pts) != N_points and iters < max_iters):
 
             acc_pts, rej_pts, acc_sigmas = self.do_density_logic( step_history, N_points, Kappa, \

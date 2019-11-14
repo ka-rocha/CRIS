@@ -49,7 +49,7 @@ class Regressor():
         self._log_history_ = makehash()
         self._cv_log_history = makehash()
 
-        self.__train_cross_val = False # update everything
+        self.__train_cross_val = False # need to still update everything
         self.__all_diffs_holder = makehash()
         self.__all_Pchange_holder = makehash()
 
@@ -99,7 +99,7 @@ class Regressor():
         for class_key, class_dict in regr_holder.items():
             for col_key, interpolated_obj in class_dict.items():
                 if verbose:
-                    print('\tdict loc:',regressor_key, class_key, col_key)
+                    print('\tdict loc: {0}, {1}, {2},'.format(regressor_key, class_key, col_key) )
                 if train_cross_val:
                     self._cv_regressors_[regressor_key][class_key][col_key] = interpolated_obj
                 else:
@@ -143,7 +143,7 @@ class Regressor():
             regressor_holder[class_key] = this_class_dict
 
         if verbose:
-            print("--- Done in %.2f seconds. ---"%( time.time() - start_time) )
+            print("--- Done in {0:.2f} seconds. ---".format( time.time() - start_time) )
 
         return regressor_holder
 
@@ -410,7 +410,7 @@ class Regressor():
                                      self.cross_val_test_input_data, cross_val = True )
             where_nan = np.where( np.isnan(predicted_values_linear) )[0]
             if len(where_nan) > 0:
-                print( regressor_key, ": %i nan points out of %i. Used rbf instead."%(len(where_nan), len(predicted_values_linear)) )
+                print("{0}: {1} nan points out of {2}. Used rbf instead.".format(regressor_key, len(where_nan), len(predicted_values_linear)) )
                 predicted_values_linear[where_nan] = predicted_values_rbf[where_nan]
             predicted_values = predicted_values_linear
         else:
@@ -425,7 +425,7 @@ class Regressor():
 
         if len(where_zero) > 0:
             percent_diffs = (diffs[where_not_zero] / self.cross_val_test_output_data[where_not_zero]) * 100
-            print("%i output with value zero. Omitting for percent change calculation."%(len(where_zero)))
+            print("{0} output with value zero. Omitting for percent change calculation.".format(len(where_zero)))
         else:
             percent_diffs = (diffs / self.cross_val_test_output_data) * 100
 
@@ -552,7 +552,7 @@ class Regressor():
         if num_y_axis == 1:
             subs = np.array([subs])
 
-        print("Plotting all regression data from class '%s'."%(class_name))
+        print("Plotting all regression data from class '{0}'.".format(class_name))
 
         for i in range( num_x_axis ):
             for k in range( num_y_axis ):

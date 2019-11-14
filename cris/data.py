@@ -69,6 +69,7 @@ def calc_avg_p_change( data, where_nearest_neighbors ):
 
 
 
+
 class TableData():
     """
     TableData
@@ -80,13 +81,15 @@ class TableData():
     Reads tables of simulation data where a single row represents one
     simulation. Each column in a row represents different inputs
     (initial conditions) and outputs (result, continuous variables).
-    Each file is assumed to have the same columns.
+    If using multiple files, each file is assumed to have the same
+    columns. You may also directly load a pandas DataFrame instead of
+    reading in files.
 
-    Example data structure expected in files:
-    0  input_1  input_2  outcome  output_1   output_2  output_3
-    1    1.5      2.6      "A"       100       0.19       -
-    2    1.5      3.0      "B"        -          -        -
-    3    2.0      2.6      "C"        -          -        6
+    Example data structure expected in files or pandas DataFrame:
+    0  input_1  input_2  outcome  output_1   output_2  output_3 ...
+    1    1.5      2.6      "A"       100       0.19       -     ...
+    2    1.5      3.0      "B"        -          -        -     ...
+    3    2.0      2.6      "C"        -          -        6     ...
     ...
 
     Parameters
@@ -99,6 +102,8 @@ class TableData():
         List of names of the columns which will be considered 'output'.
     class_col_name : str
         Name of column which contains classification data.
+    # my_DataFrame : pandas DataFrame object, optional
+    #    If given, use this instead of file paths.
     ignore_lines : int, optional
         Number of lines to ignore if files have a header.
     omit_vals : list, optional
@@ -135,10 +140,9 @@ class TableData():
 
 
     def __init__(self, table_paths, input_cols, output_cols, class_col_name, \
-                    ignore_lines=0, omit_vals=None, omit_cols=None, \
-                    subset_interval=None, verbose=False, my_colors=None, \
-                    neighbor=None, n_neighbors=[4]):
-        # TODO: add functionality for direct load of df or multiple dfs
+                    my_DataFrame = None, ignore_lines=0, omit_vals=None,
+                    omit_cols=None, subset_interval=None, verbose=False, \
+                    my_colors=None, neighbor=None, n_neighbors=[4]):
 
         __debug = False
         start_time = time.time()
@@ -151,25 +155,29 @@ class TableData():
         self._files_ = table_paths
         self.class_col_name = class_col_name # assumed to be one column name + string
 
-        # Read in all data files and add to _df_list_
-        info_str_01 = "Reading in data from {0} file(s).".format(len(table_paths))
-        self.__vb_helper(verbose, info_str_01)
+        if isinstance( my_DataFrame, pd.DataFrame ):
+            self.__vb_helper( verbose, "Using loaded Pandas DataFrame")
+            self._full_data_ = my_DataFrame
+        else:
+            # Read in all data files and add to _df_list_
+            info_str_01 = "Reading in data from {0} file(s).".format(len(table_paths))
+            self.__vb_helper(verbose, info_str_01)
 
-        for num, path in enumerate(table_paths):
-            info_str_02 = "\t'{0}'".format(path)
-            self.__vb_helper(verbose, info_str_02)
+            for num, path in enumerate(table_paths):
+                info_str_02 = "\t'{0}'".format(path)
+                self.__vb_helper(verbose, info_str_02)
 
-            df = pd.read_csv( path, header=ignore_lines, delim_whitespace=True )
-            self._df_list_.append( df )
-            self._df_index_keys_.append( 'df' + str(num) )
+                df = pd.read_csv( path, header=ignore_lines, delim_whitespace=True )
+                self._df_list_.append( df )
+                self._df_index_keys_.append( 'df' + str(num) )
 
-        info_str_03 = "Finished reading data.\n"
-        self.__vb_helper(verbose, info_str_03)
+            info_str_03 = "Finished reading data.\n"
+            self.__vb_helper(verbose, info_str_03)
 
-        # _df_index_keys_ setting index of Nth file the data is from with 'dfN'.
-        self._full_data_ = pd.concat( self._df_list_, join='outer',
-                                      ignore_index=False, keys=self._df_index_keys_,\
-                                      sort=True)
+            # _df_index_keys_ setting index of Nth file the data is from with 'dfN'.
+            self._full_data_ = pd.concat( self._df_list_, join='outer',
+                                          ignore_index=False, keys=self._df_index_keys_,\
+                                          sort=True)
 
         # remove rows and columns with unwanted data
         if omit_vals is not None:
@@ -185,12 +193,14 @@ class TableData():
             info_str_05 = "Removed a total of {0} rows.".format(ct)
             self.__vb_helper(verbose, info_str_05)
 
+        # remove entire columns
         if omit_cols is not None:
             self._full_data_ = self._full_data_.drop( columns = omit_cols )
 
             info_str_06 = "Removed columns: {0}".format(omit_cols)
             self.__vb_helper(verbose, info_str_06)
 
+        # use a subset of the original data table
         if subset_interval is not None:
             len_original_data = len(self._full_data_)
             self._full_data_ = self._full_data_.iloc[subset_interval,:]
@@ -207,7 +217,7 @@ class TableData():
         for usr_input in [input_cols, output_cols]:
             for a_name in usr_input:
                 if a_name not in self.col_names:
-                    info_str_09 = " !!! No columns with name '{0}'".format(a_name)
+                    info_str_09 = " !!! No columns with name '{0}' ".format(a_name)
                     self.__vb_helper(verbose, info_str_09)
         input_cols = [ i for i in input_cols if i in self.col_names ]
         output_cols = [ i for i in output_cols if i in self.col_names ]
@@ -240,7 +250,7 @@ class TableData():
         for cl in self._class_col_:
             self._class_col_to_ids_.append( self._class_id_mapping_[cl] )
 
-        if my_colors:
+        if my_colors is not None:
             self._class_colors_ = my_colors
             self.__vb_helper(verbose, "Using custom class colors.")
         else:
@@ -300,54 +310,54 @@ class TableData():
 
 
         # take Nearest Neighbors differences
-        info_str_14 = "\nCalculate Average Distances & Average Percent Change"
-        self.__vb_helper(verbose, info_str_14)
+        if n_neighbors is not None:
+            info_str_14 = "\nCalculate Average Distances & Average Percent Change"
+            self.__vb_helper(verbose, info_str_14)
 
-        self._n_neighbors_ = [int(i) for i in n_neighbors]
-        self._avg_dist_dfs_per_class_ = dict() # stores the average distances
+            self._n_neighbors_ = [int(i) for i in n_neighbors]
+            self._avg_dist_dfs_per_class_ = dict() # stores the average distances
 
-        # We need distances in input space, then compare %diff in output space
-        for key, val in self._regr_inputs_.items():
-            # key is the class, val is input DataFrame or np.nan
-            self._avg_dist_dfs_per_class_[key] = dict()
-            regr_data = self._regr_dfs_per_class_[key]
+            # We need distances in input space, then compare %diff in output space
+            for key, val in self._regr_inputs_.items():
+                # key is the class, val is input DataFrame or np.nan
+                self._avg_dist_dfs_per_class_[key] = dict()
+                regr_data = self._regr_dfs_per_class_[key]
 
-            if isinstance(regr_data, pd.DataFrame):
-                self.__vb_helper(verbose, "class: '{0}'".format(key))
+                if isinstance(regr_data, pd.DataFrame):
+                    self.__vb_helper(verbose, "class: '{0}'".format(key))
 
-                # find nearest neighbors in input space
-                where_nearest_neighbors = dict()
-                for n_ in self._n_neighbors_:
-                    avg_dist, indicies = calc_avg_dist(val.values, n_, neighbor=neighbor)
-                    where_nearest_neighbors[n_] = indicies
+                    # find nearest neighbors in input space
+                    where_nearest_neighbors = dict()
+                    for n_ in self._n_neighbors_:
+                        avg_dist, indicies = calc_avg_dist(val.values, n_, neighbor=neighbor)
+                        where_nearest_neighbors[n_] = indicies
 
-
-                for _key, _val in regr_data.items(): # regression data
-                    data = np.array(_val.values, dtype=float)
-                    where_zero = np.where(data==0)[0]
-                    if len(where_zero)>0:
-                        info_str_15 = "\t -- {0} zeros in '{1}'. Skipping p_change...".format(len(where_zero),_key)
-                        self.__vb_helper(verbose, info_str_15)
-                        pass
-                    else:
-                        # Take percent difference
-                        avg_p_change = calc_avg_p_change( data, where_nearest_neighbors )
-                        if avg_p_change is None:
-                            self.__vb_helper(verbose, "None in avg_p_change!? Should not happen...")
+                    for _key, _val in regr_data.items(): # regression data
+                        data = np.array(_val.values, dtype=float)
+                        where_zero = np.where(data==0)[0]
+                        if len(where_zero)>0:
+                            info_str_15 = "\t -- {0} zeros in '{1}'. Skipping p_change...".format(len(where_zero),_key)
+                            self.__vb_helper(verbose, info_str_15)
+                            pass
                         else:
-                            # update into regr_dfs_per_class - all data available for regression
-                            my_kwargs = dict()
-                            for i in range(np.shape(avg_p_change)[0]):
-                                new_col_str = "APC{0}_{1}".format(self._n_neighbors_[i], _key)
-                                self.__vb_helper(verbose, "\t"+new_col_str)
-                                my_kwargs[new_col_str] = avg_p_change[i]
-                            self._regr_dfs_per_class_[key] = self._regr_dfs_per_class_[key].assign(**my_kwargs)
+                            # Take percent difference
+                            avg_p_change = calc_avg_p_change( data, where_nearest_neighbors )
+                            if avg_p_change is None:
+                                self.__vb_helper(verbose, "None in avg_p_change!? Should not happen...")
+                            else:
+                                # update into regr_dfs_per_class - all data available for regression
+                                my_kwargs = dict()
+                                for i in range(np.shape(avg_p_change)[0]):
+                                    new_col_str = "APC{0}_{1}".format(self._n_neighbors_[i], _key)
+                                    self.__vb_helper(verbose, "\t"+new_col_str)
+                                    my_kwargs[new_col_str] = avg_p_change[i]
+                                self._regr_dfs_per_class_[key] = self._regr_dfs_per_class_[key].assign(**my_kwargs)
 
-                    self._avg_dist_dfs_per_class_[key][_key] = avg_dist
+                        self._avg_dist_dfs_per_class_[key][_key] = avg_dist
 
-            else:
-                self.__vb_helper(verbose, "No regression data in '{0}'.".format(key))
-                pass
+                else:
+                    self.__vb_helper(verbose, "No regression data in '{0}'.".format(key))
+                    pass
 
         info_str_17 = "TableData Done in {0:.2f} seconds.".format(time.time()-start_time)
         self.__vb_helper(verbose, info_str_17)
@@ -650,8 +660,8 @@ class TableData():
         #--------------
 
         # Specify value of other '3rd' axis not in 2D plot
-        slice_value = np.unique(_full_data_[third_axis])[which_val]
-        where_to_slice = _full_data_[third_axis] == slice_value  # boolean data frame
+        slice_value = np.unique(full_data[third_axis])[which_val]
+        where_to_slice = full_data[third_axis] == slice_value  # boolean data frame
 
         # Find all indicies (rows) that have the slice value
         what_index = np.where( where_to_slice == True )[0]
