@@ -57,6 +57,17 @@ class Classifier():
         self.__train_cross_val = False
 
     def train_everything(self, classifier_names, verbose=False):
+        """Trains multiple classifiers.
+
+        Parameters
+        ----------
+        classifier_names : list
+            List of strings specifying classification algorithms to use.
+
+        Returns
+        -------
+        None
+        """
         for cls_name in classifier_names:
             self.train(cls_name, verbose=verbose)
 
@@ -228,7 +239,7 @@ class Classifier():
         return binary_classifier_holder
 
 
-    def fit_gaussian_process_classifier(self, data_interval=None,my_kernel=None, n_restarts=5, verbose=False):
+    def fit_gaussian_process_classifier(self, data_interval=None, my_kernel=None, n_restarts=5, verbose=False):
         """fit a Gaussian Process classifier
         implementation from: scikit-learn
         (https://scikit-learn.org/stable/modules/gaussian_process.html)
@@ -301,7 +312,18 @@ class Classifier():
 
 
     def get_classifier_name_to_key(self, classifier_name):
-        """Return the standard key (str) of a classifier."""
+        """Return the standard key (str) of a classifier.
+
+        Parameters
+        ----------
+        classifier_name : str
+            Name of classification algorithm to use.
+
+        Returns
+        -------
+        key : str
+            Key to access trained classifier objects.
+        """
         if   classifier_name.lower() in LinearNDInterpolator_names:
             key = "LinearNDInterpolator"
         elif classifier_name.lower() in RBF_names:

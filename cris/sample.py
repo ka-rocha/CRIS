@@ -5,15 +5,16 @@ import time
 import sys
 
 import scipy.stats
+from scipy.spatial.distance import pdist
 
-# make func_call( fname, Npoints) to run everything
-# talk to scotty about installing CIRS on quest
-# give Monica access / make code public, either one
 # extra: something saying one extra point is not near other currently running point
 #        maybe also include check that it's not already in a grid cell that has a simulation
 
 class Sampler():
-    """Add some docstrings"""
+    """
+    Sampler
+    =======
+    """
 
     def __init__( self, classifier = None, regressor = None ):
         self._Classifier_ = classifier
@@ -375,15 +376,32 @@ class Sampler():
                             add_mvns_together = False, verbose = False ):
         """Do the density based off of the normal gaussian kernel on each point. This method
         automatically takes out the first 5% of steps of the mcmc so that the first starting
-        points are not chosen automatically (if you start in a non-ideal region)"""
+        points are not chosen automatically (if you start in a non-ideal region). Wait for
+        the burn in.
 
-        # shuffle the order of the steps
-        if shuffle:
+        Parameters
+        ----------
+        step_history : ndarray
+        N_points : int
+        Kappa : float
+        shuffle : bool, optional
+        norm_steps : bool, optional
+        var_mult : float, optional
+        add_mvns_together : bool, optional
+        verbose : bool, optional
+
+        Returns
+        -------
+        accepted_points : ndarray
+        rejected_points : ndarray
+        accepted_sigmas : ndarray
+        """
+
+        if shuffle: # shuffle the order of the steps
             if verbose: print("Shuffling steps....")
             np.random.shuffle(step_history) # returns none
 
-        # normalize steps
-        if norm_steps:
+        if norm_steps: # normalize steps
             if verbose: print( "Normalizing steps...." )
             step_history = self.normalize_step_history( step_history )
 
@@ -397,6 +415,7 @@ class Sampler():
             var_mult = np.array([1]*num_dim)
         else:
             var_mult = np.array( var_mult )
+            assert len(var_mult) == num_dim, "Multiplier must be the same dimensionality as input data."
 
         if verbose:
             print( "Num dims: {0}".format(num_dim) )
@@ -404,6 +423,7 @@ class Sampler():
             print( "var_mult: {0}".format(var_mult) ) # variance multiplier
             print( "Kappa: {0}".format(Kappa) ) # multiplier of average variance
 
+        ### -> Forcing a few key points to always be accepted, for example
         # if acc_pts is None:
         #     accepted_points = []
         # elif isinstance(acc_pts, str):
@@ -443,8 +463,8 @@ class Sampler():
 
 
                 if add_mvns_together:
-                    # instead of checking each individual point keeping all mvns
-                    # seperate, we want to add them together and get upper bound
+                    # instead of checking each individual point keeping all mvns seperate, we want to add them
+                    # together and get upper bound
                     # IF we do this we need to change the MVN to not be normalized !!!!
                     # THE UNORMALIZED MVN IS NOT IMPLEMENTED
                     total_chance_above_distr = rnd_chance > np.sum(distr_holder)
@@ -487,11 +507,13 @@ class Sampler():
     def get_proposed_points( self, step_history, N_points, Kappa, \
                              shuffle = False, norm_steps = False, \
                              add_mvns_together = False, \
-                             var_mult = None, seed=None, verbose = False ):
+                             var_mult = None, seed=None, n_iters=10, verbose = False ):
         """The desnity logic is not deterministic so, multiple iterations
         may be needed to converge on a desired number of proposed points.
-        This method performs multiple class to do_density_logic while
-        changing Kappa in order to return the desired number of points.
+        This method performs multiple calls to do_density_logic while
+        changing Kappa in order to return the desired number of points. After
+        n_iters instances of the correct number of N_points, the distibution
+        with the largest average distance is chosen.
 
         Parameters
         ----------
@@ -503,6 +525,7 @@ class Sampler():
         add_mvns_together : bool, optional
         var_mult : ndarray, optional
         seed : float, optional
+        n_iters: int, optional
         verbose : bool, optional
 
         Returns
@@ -526,12 +549,14 @@ class Sampler():
             numpy.random.seed(seed = seed)
             print("Setting seed: {0}".format(seed))
 
-        if verbose: print("Converging to {0} points.".format(N_points))
+        if verbose: print("Converging to {0} points, {1} times.".format(N_points, int(n_iters)))
 
-        acc_pts = []
+        enough_good_pts = False; how_many_good_pts = int(n_iters)
+        good_n_points = []; avg_distances = []; good_kappas = []
         iters = 0
         max_iters = 5e2
-        while (len(acc_pts) != N_points and iters < max_iters):
+        start_time = time.time()
+        while ( not(enough_good_pts) and iters < max_iters):
 
             acc_pts, rej_pts, acc_sigmas = self.do_density_logic( step_history, N_points, Kappa, \
                                                         norm_steps = norm_steps, \
@@ -539,8 +564,22 @@ class Sampler():
                                                         shuffle = shuffle, \
                                                         add_mvns_together = add_mvns_together, \
                                                         verbose = False )
+
+            average_dist_between_acc_points = np.mean( pdist( acc_pts ) )
+            if len(acc_pts) == N_points:
+                good_n_points.append( acc_pts )
+                good_kappas.append( Kappa )
+                avg_distances.append( average_dist_between_acc_points )
+                if len( good_n_points ) >= how_many_good_pts:
+                    enough_good_pts = True
+
             if verbose:
-                print( "\t acc_pts: {0}, Kappa = {1:.3f}".format(len(acc_pts), Kappa) )
+                if len(acc_pts) == N_points:
+                    print_str = "  *{0}*  {1:2.2f}s".format( len(good_n_points), abs(start_time-time.time()) )
+                    ending = "\n"
+                else:
+                    print_str = "" ; ending = "\r"
+                print( "\t acc_pts: {0}, Kappa = {1:.3f}".format(len(acc_pts), Kappa) + print_str, end=ending )
 
             diff = abs( len(acc_pts) - N_points )
             if len(acc_pts) > N_points:
@@ -554,15 +593,31 @@ class Sampler():
         if (iters == max_iters): print("Reached max iters before converging!")
         if verbose: print("\nFinal Kappa = {0}\n".format(Kappa))
 
-        # plot of the little mvns maybe???
-        self.make_prop_points_plots(acc_pts) # doesn't work yet
+        # we want 1/r dependance to penalize closely spaced points
+        where_best_distribution = np.argmax( avg_distances )
+        best_acc_pts = good_n_points[where_best_distribution]
+        best_Kappa = good_kappas[where_best_distribution]
+        if verbose:
+            print( "Average Distances: \n{0}".format( np.array(avg_distances)) )
+            print( "Kappas: \n{0}".format(np.array(good_kappas)) )
+            print( "loc: {0}".format(where_best_distribution) )
 
-        return acc_pts, Kappa
+            self.make_prop_points_plots(step_history, best_acc_pts) # doesn't work yet
+
+        return best_acc_pts, best_Kappa
 
 
-    def make_prop_points_plots(self, prop_points, show_fig = True, save_fig=False ):
-        """If your inputs are 2d then we can plot them like this.
-        THIS METHOD DOES NOTHING. """
+    def make_prop_points_plots(self, step_hist, prop_points, axes = (0,1),
+                                    show_fig = True, save_fig=False ):
+        """Plot the proposed / accepted points over the step history."""
+        axis1, axis2 = axes
+        plt.figure(figsize=(4,4), dpi=90)
+        plt.scatter( step_hist.T[axis1], step_hist.T[axis2], alpha=0.5, label="step history" )
+        plt.scatter( prop_points.T[axis1], prop_points.T[axis2], color='pink', label="accepted points" )
+        plt.xlim( self.min_vals[axis1], self.max_vals[axis1] )
+        plt.ylim( self.min_vals[axis2], self.max_vals[axis2] )
+        plt.legend(loc='best')
+        plt.show()
         return None
 
 

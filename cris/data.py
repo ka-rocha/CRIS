@@ -41,13 +41,26 @@ def calc_avg_dist(data, n_neighbors, neighbor=None):
     g_dist = (dist.T[1:len(dist)]).T
     g_indi = (indicies.T[1:len(indicies)]).T
     avg_dist =  np.mean(g_dist, axis = 1)
-
     return avg_dist, g_indi
 
 
 def calc_avg_p_change( data, where_nearest_neighbors ):
+    """Calculate the average percent or fractional change in a given data set.
+
+    Parameters
+    ----------
+    data : ndarray
+        Data set to calculate percent change.
+    where_nearest_neighbors : dict
+        Indicies in data for the n nearest neighbors in input space.
+
+    Returns
+    -------
+    avg_p_change_holder : ndarray
+        Each element conatins the average percent change for a given number of neighbors.
+    """
     where_zero = np.where(data==0)[0]
-    if len(where_zero)>0:
+    if len(where_zero)>0: # can't calculate percent change from 0
         return None
     else:
         pass
@@ -65,7 +78,7 @@ def calc_avg_p_change( data, where_nearest_neighbors ):
 
         avg_p_change_holder.append( avg_p_change )
 
-    return np.array( avg_p_change_holder )
+    return np.array(avg_p_change_holder)
 
 
 
@@ -76,21 +89,23 @@ class TableData():
     =========
 
     For managing data sets used for classification and regression.
-    Required data object for Classifier and Regressor.
 
-    Reads tables of simulation data where a single row represents one
-    simulation. Each column in a row represents different inputs
-    (initial conditions) and outputs (result, continuous variables).
-    If using multiple files, each file is assumed to have the same
-    columns. You may also directly load a pandas DataFrame instead of
-    reading in files.
+        Reads tables of simulation data where a single row represents one
+        simulation. Each column in a row represents different inputs
+        (initial conditions) and outputs (result, continuous variables).
+        If using multiple files, each file is assumed to have the same
+        columns. You may also directly load a pandas DataFrame instead of
+        reading in files.
 
-    Example data structure expected in files or pandas DataFrame:
-    0  input_1  input_2  outcome  output_1   output_2  output_3 ...
-    1    1.5      2.6      "A"       100       0.19       -     ...
-    2    1.5      3.0      "B"        -          -        -     ...
-    3    2.0      2.6      "C"        -          -        6     ...
-    ...
+        Example data structure expected in files or pandas DataFrame:
+        0  input_1  input_2  outcome  output_1   output_2  output_3 ...
+        1    1.5      2.6      "A"       100       0.19       -     ...
+        2    1.5      3.0      "B"        -          -        -     ...
+        3    2.0      2.6      "C"        -          -        6     ...
+        ...
+
+        The above table has dashes '-' in output columns to indicate Nan values.
+        This may occur if different classes have fundamentally different outputs.
 
     Parameters
     ----------
@@ -102,8 +117,8 @@ class TableData():
         List of names of the columns which will be considered 'output'.
     class_col_name : str
         Name of column which contains classification data.
-    # my_DataFrame : pandas DataFrame object, optional
-    #    If given, use this instead of file paths.
+    my_DataFrame : pandas DataFrame object, optional
+        If given, use this instead of file paths.
     ignore_lines : int, optional
         Number of lines to ignore if files have a header.
     omit_vals : list, optional
@@ -119,11 +134,13 @@ class TableData():
         Colors to use for classification plots.
     n_neighbors : list, optional
         List of integers that set the number of neighbors to use to
-        calculate average distances. (default [4])
+        calculate average distances. (default None)
     neighbor : instance of NearestNeighbors class, optional
         To use for average distances. See function 'calc_avg_dist()'.
     verbose : bool, optional
         Print statements with extra info.
+    **kwargs : dict, optional
+        Kwargs used in the pandas function 'read_csv()'.
 
     Attributes
     ----------
@@ -140,14 +157,12 @@ class TableData():
 
 
     def __init__(self, table_paths, input_cols, output_cols, class_col_name, \
-                    my_DataFrame = None, ignore_lines=0, omit_vals=None,
-                    omit_cols=None, subset_interval=None, verbose=False, \
-                    my_colors=None, neighbor=None, n_neighbors=[4]):
+                    my_DataFrame = None, omit_vals=None, omit_cols=None,
+                    subset_interval=None, verbose=False, my_colors=None, \
+                    neighbor=None, n_neighbors=None, **kwargs ):
 
-        __debug = False
         start_time = time.time()
-        # storing info strings
-        self._for_info_ = []
+        self._for_info_ = []  # storing info strings
 
         # --------- data pre-processing ---------
         self._df_list_ = [] # data frame list
@@ -167,7 +182,7 @@ class TableData():
                 info_str_02 = "\t'{0}'".format(path)
                 self.__vb_helper(verbose, info_str_02)
 
-                df = pd.read_csv( path, header=ignore_lines, delim_whitespace=True )
+                df = pd.read_csv( path, **kwargs )
                 self._df_list_.append( df )
                 self._df_index_keys_.append( 'df' + str(num) )
 
@@ -225,7 +240,7 @@ class TableData():
         self._output_ = self._full_data_[output_cols]
 
         # --------- classification variables ---------
-        try:
+        try: # TODO: this catch is not working correctly for some reason
             self._unique_class_keys_ = np.unique( self._full_data_[class_col_name] )
         except KeyError():
             info_str_10 = "'{0}' not in {1}".format(class_col_name, np.array(self._full_data_.keys()))
@@ -632,9 +647,11 @@ class TableData():
         input_data = self._input_
 
         if len(input_data) == 2:
-            print("2D data")
+            print("2D input data")
+        if len(input_data) == 3:
+            print("3D input data")
 
-        if axes:
+        if axes is not None:
             first_axis, second_axis, third_axis = axes
         else:
             first_axis, second_axis, third_axis = input_data.keys()
@@ -671,7 +688,7 @@ class TableData():
         # class IDs (ints 0->n) to color code
         class_to_colors = [ color_dict[val] for val in IDs[what_index] ]
 
-        plt.figure( figsize=fig_size, dpi=120 )
+        fig = plt.figure( figsize=fig_size, dpi=120 )
         plt.title( third_axis + '= %f'%(slice_value) )
         plt.scatter( data_to_plot[first_axis], data_to_plot[second_axis], \
                      c = class_to_colors, \
@@ -680,4 +697,9 @@ class TableData():
         plt.xlabel(first_axis); plt.ylabel(second_axis)
         plt.legend( handles = legend_elements, bbox_to_anchor = (1.03, 1.02))
         if save_fig: plt.savefig( "data_plot_{0}.pdf".format(plt_str), bbox_inches='tight')
-        plt.show()
+        return fig
+
+        
+    def add_class_data_plot(self, fig, ax, which_ax=(0)):
+        ax[which_ax].plot( np.random.rand(10) )
+        return fig, ax
