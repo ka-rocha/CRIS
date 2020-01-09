@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import pandas as pd
 import time
+from collections import OrderedDict
 
 # -------- classifiers --------
 from scipy.interpolate import LinearNDInterpolator
@@ -44,12 +45,12 @@ class Classifier():
 
         self._TableData_ = TableData_object
 
-        holder = self._TableData_.get_all_class_data()
+        holder = self._TableData_.get_class_data(what_data="full")
         self.class_names = holder[1] #_unique_class_keys_
         self.classes_to_ids = holder[2] #_class_col_to_ids_
         self.class_id_mapping = holder[3] #_class_id_mapping_
         self.binary_class_data = holder[4] #_binary_data_
-        self.input_data = self._TableData_.get_data(what_data = "input")
+        self.input_data = self._TableData_.get_data(what_data="input")
 
         self._interpolators_ = makehash()
         self._cv_interpolators_ = makehash()
@@ -69,7 +70,8 @@ class Classifier():
         None
         """
         for cls_name in classifier_names:
-            self.train(cls_name, verbose=verbose)
+            self.train(cls_name, di=None, verbose=verbose)
+        return None
 
     def train(self, classifier_name, di = None, verbose = False ):
         """Train a classifier.
@@ -124,12 +126,12 @@ class Classifier():
 
         if verbose:
             print("Done training {0}.".format(classifier_key))
-        return
+        return None
 
 
     def fit_linear_ND_interpolator(self, data_interval = None, verbose = False):
         """Fit linear ND interpolator - binary classification (one against all)
-        implementation from: scipy
+        implementation from: scipy.interpolate.LinearNDInterpolator
         (https://docs.scipy.org/doc/scipy/reference/interpolate.html)
 
         Parameters
@@ -154,7 +156,7 @@ class Classifier():
 
         start_time = time.time()
 
-        binary_classifier_holder = dict()
+        binary_classifier_holder = OrderedDict()
 
         for i, cls_data in enumerate(self.binary_class_data):
             iter_time = time.time()
@@ -180,7 +182,7 @@ class Classifier():
 
     def fit_rbf_interpolator(self, data_interval = None, verbose = False):
         """Fit RBF interpolator - binary classification (one against all)
-        implementation from: scipy
+        implementation from: scipy.interpolate.Rbf
         (https://docs.scipy.org/doc/scipy/reference/interpolate.html)
 
         Parameters
@@ -205,7 +207,7 @@ class Classifier():
 
         start_time = time.time()
 
-        binary_classifier_holder = dict()
+        binary_classifier_holder = OrderedDict()
 
         for i, cls_data in enumerate(self.binary_class_data):
             iter_time = time.time()
@@ -241,7 +243,7 @@ class Classifier():
 
     def fit_gaussian_process_classifier(self, data_interval=None, my_kernel=None, n_restarts=5, verbose=False):
         """fit a Gaussian Process classifier
-        implementation from: scikit-learn
+        implementation from: sklearn.gaussian_process
         (https://scikit-learn.org/stable/modules/gaussian_process.html)
 
         Parameters
@@ -270,7 +272,7 @@ class Classifier():
 
         start_time = time.time()
 
-        binary_classifier_holder = dict()
+        binary_classifier_holder = OrderedDict()
 
         for i, cls_data in enumerate(self.binary_class_data):
             iter_time = time.time()
@@ -331,8 +333,8 @@ class Classifier():
         elif classifier_name.lower() in GaussianProcessClassifier_names:
             key = "GaussianProcessClassifier"
         else:
-            print("No classifiers with name '%s'."%classifier_name)
-            return
+            print("No classifiers with name '{0}'.".format(classifier_name))
+            return None
         return key
 
 
@@ -637,35 +639,6 @@ class Classifier():
         return
 
 
-    def make_max_cls_plot(self,):
-        """THIS FUNCTION DOES NOT WORK
-        DO NOT USE YET!"""
-        return
-        vals = self.get_rnd_test_inputs(4000)
-
-        class_vals, probs = classify_obj.return_class_predictions("rbf", vals, return_probs=True )
-
-        fig, (cls_data, prob) = plt.subplots( 1, 2, figsize=(12,4), \
-                                gridspec_kw={'width_ratios': [1., 1.2]} )
-
-        cls_data.set_title("Predictions from trained classifier")
-        cls_data.set_xlabel("input_1"); cls_data.set_ylabel("input_2")
-        cls_data.scatter( self._TableData_.get_input_data().T[0],
-                          self._TableData_.get_input_data().T[1],
-                          c = self._TableData_.get_output_data().T[0])
-                          # You need to use a mapping to get classes to colors
-                          # I should add this to data.py
-
-        prob.set_xlabel("input_1")
-        prob_plt = prob.scatter( vals.T[0], vals.T[1], \
-                                c = np.max( probs, axis = 1 ), cmap = 'bone', )
-
-        cb = fig.colorbar( prob_plt)
-        cb.ax.set_ylabel( "Maximum classification probability" )
-        plt.show()
-
-
-
     def get_rnd_test_inputs(self, N, other_rng=dict(), verbose=False):
         """Produce randomly sampled 'test' inputs inside domain of input_data.
 
@@ -712,5 +685,29 @@ class Classifier():
 
         # now put the random points back together with same shape as input_data
         rnd_test_points = np.concatenate( axis_rnd_points, axis = 1  )
-
         return rnd_test_points
+
+
+    def make_max_cls_plot(self,):
+        """THIS FUNCTION DOES NOT WORK
+        DO NOT USE YET!"""
+        return None
+        vals = self.get_rnd_test_inputs(4000)
+        class_vals, probs = self.return_class_predictions("rbf", vals, return_probs=True )
+
+        fig, (cls_data, prob) = plt.subplots( 1, 2, figsize=(12,4), \
+                                gridspec_kw={'width_ratios': [1., 1.2]} )
+
+        cls_data.set_title("Predictions from trained classifier")
+        cls_data.set_xlabel("input_1"); cls_data.set_ylabel("input_2")
+        cls_data.scatter( self._TableData_.get_input_data().T[0],
+                          self._TableData_.get_input_data().T[1],
+                          c = self._TableData_.get_output_data().T[0])
+                          # You need to use a mapping to get classes to colors
+                          # I should add this to data.py
+        prob.set_xlabel("input_1")
+        prob_plt = prob.scatter( vals.T[0], vals.T[1], \
+                                c = np.max( probs, axis = 1 ), cmap = 'bone', )
+        cb = fig.colorbar( prob_plt)
+        cb.ax.set_ylabel( "Maximum classification probability" )
+        plt.show()

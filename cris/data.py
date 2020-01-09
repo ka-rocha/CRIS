@@ -5,6 +5,7 @@ import pandas as pd
 import math
 import time
 
+from collections import OrderedDict
 from sklearn.neighbors import NearestNeighbors
 
 def calc_avg_dist(data, n_neighbors, neighbor=None):
@@ -44,8 +45,9 @@ def calc_avg_dist(data, n_neighbors, neighbor=None):
     return avg_dist, g_indi
 
 
-def calc_avg_p_change( data, where_nearest_neighbors ):
-    """Calculate the average percent or fractional change in a given data set.
+def calc_avg_p_change( data, where_nearest_neighbors, undefined_p_change_val = None ):
+    """Calculate the average percent or "fractional change" in a given data set with
+    their N nearest neighbors (calculated beforehand).
 
     Parameters
     ----------
@@ -53,17 +55,20 @@ def calc_avg_p_change( data, where_nearest_neighbors ):
         Data set to calculate percent change.
     where_nearest_neighbors : dict
         Indicies in data for the n nearest neighbors in input space.
+    undefined_p_change_val : optional
+        For output with an undefined percent change (zero value), this kwarg defines
+        what is put in its place. Defaults to nan.
 
     Returns
     -------
     avg_p_change_holder : ndarray
         Each element conatins the average percent change for a given number of neighbors.
+        If any output values are 0, then a nan is put in place of a percent change.
     """
     where_zero = np.where(data==0)[0]
-    if len(where_zero)>0: # can't calculate percent change from 0
+    where_not_zero = np.where(data!=0)[0]
+    if len(where_zero) == len(data):
         return None
-    else:
-        pass
 
     avg_p_change_holder = []
     for n_, indicies in where_nearest_neighbors.items():
@@ -74,13 +79,16 @@ def calc_avg_p_change( data, where_nearest_neighbors ):
 
         diffs = np.array(diff_holder).T
         avg_diffs = np.mean( diffs, axis=1 )
-        avg_p_change = abs(avg_diffs)/data
+        avg_p_change = np.zeros( data.shape )
+        avg_p_change[where_not_zero] = abs(avg_diffs[where_not_zero])/data[where_not_zero]
+        if undefined_p_change_val is None:
+            avg_p_change[where_zero] = np.nan
+        else:
+            avg_p_change[where_zero] = undefined_p_change_val
 
         avg_p_change_holder.append( avg_p_change )
 
     return np.array(avg_p_change_holder)
-
-
 
 
 class TableData():
@@ -93,9 +101,9 @@ class TableData():
         Reads tables of simulation data where a single row represents one
         simulation. Each column in a row represents different inputs
         (initial conditions) and outputs (result, continuous variables).
-        If using multiple files, each file is assumed to have the same
-        columns. You may also directly load a pandas DataFrame instead of
-        reading in files.
+        If using multiple files, each file is assumed to have the same columns.
+        You may also directly load a pandas DataFrame instead of reading in
+        files.
 
         Example data structure expected in files or pandas DataFrame:
         0  input_1  input_2  outcome  output_1   output_2  output_3 ...
@@ -105,12 +113,14 @@ class TableData():
         ...
 
         The above table has dashes '-' in output columns to indicate Nan values.
-        This may occur if different classes have fundamentally different outputs.
+        You may have similar structure if different classes have fundamentally
+        different outputs.
 
     Parameters
     ----------
     table_paths : list
         List of file paths to read in as data.
+        if None, a pandas DataFrame is used instead
     input_cols : list
         List of names of the columns which will be considered 'input'.
     output_cols : list
@@ -119,12 +129,10 @@ class TableData():
         Name of column which contains classification data.
     my_DataFrame : pandas DataFrame object, optional
         If given, use this instead of file paths.
-    ignore_lines : int, optional
-        Number of lines to ignore if files have a header.
     omit_vals : list, optional
         Numerical values that you wish to omit from the data set.
         If a row contains the value, the entire row is removed.
-        For example you way want to omit all rows if they contain "-1".
+        For example you way want to omit all rows if they contain "-1" or "failed".
     omit_cols : list, optional
         Column names that you wish to omit from the data set.
     subset_interval : array, optional
@@ -135,8 +143,11 @@ class TableData():
     n_neighbors : list, optional
         List of integers that set the number of neighbors to use to
         calculate average distances. (default None)
-    neighbor : instance of NearestNeighbors class, optional
+    neighbor : instance of sklearn.neighbors.NearestNeighbors, optional
         To use for average distances. See function 'calc_avg_dist()'.
+    undefined_p_change_val : optional
+        Sets the undefined value used when calculating percent change fails
+        due to zero values in the output data. Default (None) uses nan.
     verbose : bool, optional
         Print statements with extra info.
     **kwargs : dict, optional
@@ -157,9 +168,9 @@ class TableData():
 
 
     def __init__(self, table_paths, input_cols, output_cols, class_col_name, \
-                    my_DataFrame = None, omit_vals=None, omit_cols=None,
+                    my_DataFrame = None, omit_vals=None, omit_cols=None, \
                     subset_interval=None, verbose=False, my_colors=None, \
-                    neighbor=None, n_neighbors=None, **kwargs ):
+                    neighbor=None, n_neighbors=None, undefined_p_change_val=None,**kwargs ):
 
         start_time = time.time()
         self._for_info_ = []  # storing info strings
@@ -211,7 +222,6 @@ class TableData():
         # remove entire columns
         if omit_cols is not None:
             self._full_data_ = self._full_data_.drop( columns = omit_cols )
-
             info_str_06 = "Removed columns: {0}".format(omit_cols)
             self.__vb_helper(verbose, info_str_06)
 
@@ -219,7 +229,7 @@ class TableData():
         if subset_interval is not None:
             len_original_data = len(self._full_data_)
             self._full_data_ = self._full_data_.iloc[subset_interval,:]
-            info_str_07 = "--Using Subset--\n" + "{0} percent of total data set.".format(len(self._full_data_)/len_original_data*100)
+            info_str_07 = "--Using Subset--\n{0} percent of total data set.".format(len(self._full_data_)/len_original_data*100)
             self.__vb_helper(verbose, info_str_07)
 
         info_str_08 = "Total number of data points: {0}\n".format(len(self._full_data_))
@@ -232,19 +242,23 @@ class TableData():
         for usr_input in [input_cols, output_cols]:
             for a_name in usr_input:
                 if a_name not in self.col_names:
-                    info_str_09 = " !!! No columns with name '{0}' ".format(a_name)
+                    info_str_09 = "\tWarning: No columns found with name '{0}'. Check your data.".format(a_name)
                     self.__vb_helper(verbose, info_str_09)
+                    # raise Warning( info_str_09 ) TODO
         input_cols = [ i for i in input_cols if i in self.col_names ]
         output_cols = [ i for i in output_cols if i in self.col_names ]
         self._input_  = self._full_data_[input_cols]
         self._output_ = self._full_data_[output_cols]
 
         # --------- classification variables ---------
-        try: # TODO: this catch is not working correctly for some reason
+        try:
             self._unique_class_keys_ = np.unique( self._full_data_[class_col_name] )
-        except KeyError():
-            info_str_10 = "'{0}' not in {1}".format(class_col_name, np.array(self._full_data_.keys()))
-            self.__vb_helper(verbose, info_str_10)
+            self._class_dtype_ = type( self._unique_class_keys_[0] )
+        except KeyError as class_col_name:
+            info_str_10 = "Class column {0} not in {1}".format(class_col_name, np.array(self._full_data_.keys()).astype(str) )
+            self.__vb_helper(False, info_str_10)
+            raise KeyError( info_str_10 )
+
         self.num_classes = len(self._unique_class_keys_)
         self.class_ids = np.arange( 0, self.num_classes, 1, dtype=int)
 
@@ -254,13 +268,13 @@ class TableData():
         self.__vb_helper(verbose, info_str_11)
 
         # mapping dict - forward & backward
-        self._class_id_mapping_ = dict()
-        for i in range(self.num_classes):
+        self._class_id_mapping_ = OrderedDict()
+        for i in self.class_ids:
             self._class_id_mapping_[i] = self._unique_class_keys_[i]
             self._class_id_mapping_[ self._unique_class_keys_[i] ] = i
 
         # classification column replaced with class_id
-        self._class_col_ = self._full_data_[class_col_name].values
+        self._class_col_ = self._full_data_[class_col_name].values.astype(self._class_dtype_)
         self._class_col_to_ids_ = []
         for cl in self._class_col_:
             self._class_col_to_ids_.append( self._class_id_mapping_[cl] )
@@ -278,10 +292,13 @@ class TableData():
         # --------- regression variables ---------
 
         # make input and output dicts for each class
-        self._regr_inputs_ = dict()
-        self._regr_outputs_ = dict()
+        self._regr_inputs_ = OrderedDict()
+        self._regr_outputs_ = OrderedDict()
         for cls_name in self._unique_class_keys_:
             rows_where_class = np.where( self._output_[class_col_name] == cls_name )
+            if len(rows_where_class[0]) == 0:
+                info_str_extra_1 = "\tWarning: no output with class name {0}.".format(cls_name)
+                self.__vb_helper(verbose, info_str_extra_1)
             self._regr_inputs_[cls_name] =  self._input_.iloc[rows_where_class]
             self._regr_outputs_[cls_name] = self._output_.iloc[rows_where_class]
 
@@ -290,19 +307,21 @@ class TableData():
 
         # find valid regression data and link it to a class
         self.regr_names = self._output_.columns
-        self.num_outputs_to_regr = []
-        self._regr_dfs_per_class_ = dict()
+        self._num_outputs_to_regr_ = []
+        self._regr_dfs_per_class_ = OrderedDict()
         # for each class - find columns which can be converted to floats
         for i, tuple_output in enumerate( self._regr_outputs_.items() ):
             output_per_class = tuple_output[1] # 0 returns key; 1 returns data
 
-            cols_with_float = []
-            bad_cols = []
+            # this makes sure the classification column is not part of regression data in the case classes are integers or somthing
+            where_no_classification = np.where( output_per_class.columns != class_col_name )[0]
+
+            cols_with_float = []; bad_cols = []
             # go through first row and try to convert each element to float - also check if nan
-            for col_num, val in enumerate( output_per_class.iloc[0,:]):
+            for col_num, val in zip( where_no_classification, output_per_class.iloc[0, where_no_classification]):
                 try:
-                    var = float(val) # if fails -> straight to except (skips next line)
-                    if math.isnan(var):
+                    converted_val = float(val) # if fails -> straight to except (skips next line)
+                    if math.isnan(converted_val):
                         bad_cols.append( col_num )
                     else:
                         cols_with_float.append( col_num )
@@ -312,13 +331,10 @@ class TableData():
             info_str_13 = "%7i \t '%s'"%( len(cols_with_float), self._unique_class_keys_[i] )
             self.__vb_helper(verbose, info_str_13)
 
-            self.num_outputs_to_regr.append( len(cols_with_float) )
-
-            regression_vals_df = output_per_class.iloc[:,cols_with_float]
-            # 'regression_vals_df' has the regression data frame for a given class
-
+            self._num_outputs_to_regr_.append( len(cols_with_float) )
+            regression_vals_df = output_per_class.iloc[:,cols_with_float] # has the regression DataFrame for a given class
             # if regressable elements - link class with the df of valid floats, else - None
-            if cols_with_float:
+            if len(cols_with_float)>0:
                 self._regr_dfs_per_class_[self._unique_class_keys_[i]] = regression_vals_df
             else:
                 self._regr_dfs_per_class_[self._unique_class_keys_[i]] = np.nan
@@ -330,85 +346,138 @@ class TableData():
             self.__vb_helper(verbose, info_str_14)
 
             self._n_neighbors_ = [int(i) for i in n_neighbors]
-            self._avg_dist_dfs_per_class_ = dict() # stores the average distances
+            self._avg_dist_dfs_per_class_ = OrderedDict() # stores the average distances
 
             # We need distances in input space, then compare %diff in output space
-            for key, val in self._regr_inputs_.items():
-                # key is the class, val is input DataFrame or np.nan
-                self._avg_dist_dfs_per_class_[key] = dict()
-                regr_data = self._regr_dfs_per_class_[key]
+            for key, input_df_per_class in self._regr_inputs_.items():
+                self._avg_dist_dfs_per_class_[key] = OrderedDict()
+                regr_data = self._regr_dfs_per_class_[key] # either a DataFrame or np.nan
 
                 if isinstance(regr_data, pd.DataFrame):
                     self.__vb_helper(verbose, "class: '{0}'".format(key))
 
                     # find nearest neighbors in input space
-                    where_nearest_neighbors = dict()
+                    where_nearest_neighbors = OrderedDict()
                     for n_ in self._n_neighbors_:
-                        avg_dist, indicies = calc_avg_dist(val.values, n_, neighbor=neighbor)
+                        avg_dist, indicies = calc_avg_dist( input_df_per_class.values, n_, neighbor=neighbor)
                         where_nearest_neighbors[n_] = indicies
 
                     for _key, _val in regr_data.items(): # regression data
                         data = np.array(_val.values, dtype=float)
                         where_zero = np.where(data==0)[0]
+                        where_not_zero = np.where(data!=0)[0]
                         if len(where_zero)>0:
-                            info_str_15 = "\t -- {0} zeros in '{1}'. Skipping p_change...".format(len(where_zero),_key)
+                            info_str_15 = "\t -- {0} zeros in '{1}'".format(len(where_zero),_key)
                             self.__vb_helper(verbose, info_str_15)
-                            pass
+                            if len(where_zero) == len(data):
+                                self.__vb_helper(verbose, f"Skipping percent change for {_key}... All data is zero.")
+                                continue
+                        # Take percent difference
+                        avg_p_change = calc_avg_p_change(data, where_nearest_neighbors,
+                                                        undefined_p_change_val=undefined_p_change_val)
+                        if avg_p_change is None:
+                            self.__vb_helper(verbose, "None in avg_p_change!? This shouldn't happen...")
                         else:
-                            # Take percent difference
-                            avg_p_change = calc_avg_p_change( data, where_nearest_neighbors )
-                            if avg_p_change is None:
-                                self.__vb_helper(verbose, "None in avg_p_change!? Should not happen...")
-                            else:
-                                # update into regr_dfs_per_class - all data available for regression
-                                my_kwargs = dict()
-                                for i in range(np.shape(avg_p_change)[0]):
-                                    new_col_str = "APC{0}_{1}".format(self._n_neighbors_[i], _key)
-                                    self.__vb_helper(verbose, "\t"+new_col_str)
-                                    my_kwargs[new_col_str] = avg_p_change[i]
-                                self._regr_dfs_per_class_[key] = self._regr_dfs_per_class_[key].assign(**my_kwargs)
+                            # update into regr_dfs_per_class - all data available for regression
+                            my_kwargs = OrderedDict()
+                            for i in range(np.shape(avg_p_change)[0]):
+                                new_col_str = "APC{0}_{1}".format(self._n_neighbors_[i], _key)
+                                self.__vb_helper(verbose, "\t"+new_col_str)
+                                my_kwargs[new_col_str] = avg_p_change[i]
+                            self._regr_dfs_per_class_[key] = self._regr_dfs_per_class_[key].assign(**my_kwargs)
 
                         self._avg_dist_dfs_per_class_[key][_key] = avg_dist
 
                 else:
                     self.__vb_helper(verbose, "No regression data in '{0}'.".format(key))
-                    pass
 
-        info_str_17 = "TableData Done in {0:.2f} seconds.".format(time.time()-start_time)
+        info_str_17 = "::: TableData created in {0:.2f} seconds :::".format(time.time()-start_time)
         self.__vb_helper(verbose, info_str_17)
 
-
-    def get_data(self, what_data = "full", return_df = False):
-        """Get all data contained in DataTable object after omission and
-        subset cleaning. (Before data processing for class and regression.)
+    def find_n_neighbors(self, input_data, n_neighbors, neighbor=None, return_avg_dists=False, **kwargs):
+        """Given a set of arbitrary input points, find the n nearest neighbors
+        to each point, not including themselves. Can also return average distance from
+        a point to its n nearest neighbors.
 
         Parameters
         ----------
-        what_data: str, optional
+        input_data : ndarray, pandas DataFrame
+            Data points where their nearest neighbors will be found
+        n_neighbors : list
+            List of integers with number of neighbors to calculate
+        neighbor : instance of NearestNeightbors class
+            For passing your own object.
+        return_avg_dists : bool, optional
+            If True, return the a dictionary with average distances between
+            the n nearest neighbors listed in 'n_neighbors'.
+
+        Returns
+        -------
+        where_nearest_neighbors : dict
+            Dictionary containing the n nearest neighbors for every point
+            in the input data.
+        avg_distances : dict
+            Returned if return_avg_dists is True.
+            The average distances between the nearest neighbors.
+        """
+        class_key = kwargs.pop("class_key", None)
+        if class_key is not None:
+            input_data = self._regr_dfs_per_class_[key]
+        if isinstance( input_data, pd.DataFrame ):
+            input_data = input_data.values
+        elif isinstance( input_data, list() ):
+            input_data = np.array(input_data)
+        elif isinstace( input_data, np.array() ):
+            pass
+        else:
+            raise ValueError("input_data must be pandas DataFrame or numpy array")
+        where_nearest_neighbors = OrderedDict()
+        avg_distances = OrderedDict()
+        for n_ in n_neighbors:
+            avg_dist, indicies = calc_avg_dist( input_data, n_, neighbor=neighbor)
+            where_nearest_neighbors[n_] = indicies
+            avg_distances[n_] = avg_dist
+        if return_diffs:
+            return where_nearest_neighbors, avg_distances
+        else:
+            return where_nearest_neighbors
+
+    def get_data(self, what_data="full", return_df=False):
+        """Get all data contained in DataTable object after omission of columns
+        and rows containing specified values (if given) and taking a subset (if
+        given) of the original data set read in as a csv or given directly as a
+        pandas DataFrame. (Before data processing for class and regression.)
+
+        Parameters
+        ----------
+        what_data: str, list, optional
             Default is 'full' with other options 'input', or 'output'.
+            'full' - original data table (after omission and subsets)
+            'input' - only data identified as inputs from 'full' data set
+            'output' - only data identified as outputs from 'full' data set
         return_df: bool, optional
             If True, return a pandas DataFrame object.
             If False (default), return a numpy array.
 
         Returns
         -------
-        data: ndarray or DataFrame
-            An object containing all data from loaded files
-            that has not already been removed in pre-processing.
+        data: tuple, ndarray or DataFrame
+            Data before classification and regression data sorting is done.
+            Will return tuple of len(what_data) if a list is passed.
         """
-        if (what_data.lower()=="full"):
-            data = self._full_data_
-        elif (what_data.lower()=="input"):
-            data = self._input_
-        elif (what_data.lower()=="output"):
-            data = self._output_
+        data_dict = {"input":self._input_,
+                     "output":self._output_,
+                     "full":self._full_data_}
+        if isinstance(what_data, str):
+            my_data = data_dict[what_data.lower()]
+        elif isinstance(what_data, list):
+            my_data = tuple([data_dict[i.lower()] for i in what_data])
         else:
-            raise ValueError("'{0}' not supported. Try 'full', 'input', or 'output'.".format(what_data))
+            raise ValueError("'{0}' not supported. Try {1}.".format(what_data, data_dict.keys()))
         if return_df:
-            return data
+            return my_data
         else:
             return data.values
-
 
     def get_binary_mapping_per_class(self,):
         """Get binary mapping (0 or 1) of the class data for each unique
@@ -430,95 +499,125 @@ class TableData():
             number of classifications in the data set.
             Order is determined by '_unique_class_keys_'.
         """
-        cls = self._class_col_
+        cls = self._class_col_.copy()
         # create a different array for each class - one against all
         binary_class_data = []
-        for i in range(self.num_classes):
+        for i in self.class_ids:
             where_class_is = np.where( cls == self._unique_class_keys_[i], 1, 0 ) # 1 for True, 0 for False
             binary_class_data.append( np.concatenate(where_class_is, axis=None) )
-
         return np.array(binary_class_data)
 
+    def _return_data_(self, name, verbose=False):
+        "Return a regular or hidden class variable."
+        hidden_name = "_" + name + "_"
+        if (name in self.__dict__):
+            return self.__dict__[name]
+        elif (hidden_name in self.__dict__):
+            return self.__dict__[hidden_name]
+        else:
+            if verbose:
+                print("{0}, {1} not in class variables: \n{2}".format(name, hidden_name, self.__dict__))
+            return None
 
-    def get_all_class_data(self, ):
-        """Get all data related to classification.
+    def get_class_data(self, what_data="full"):
+        """Get data related to classification.
+
+        Parameters
+        ----------
+        what_data, str, list, optional
+            'class_col' (array)
+                - Original classification data.
+            'unique_class_keys' (array)
+                - Unique classes found in the classification data.
+            'class_col_to_ids' (array)
+                - Original classification data replaced with their
+                  respective class IDs (integers).
+            'class_id_mapping' (dict)
+                - Mapping between a classification from the original
+                  data set and its class ID.
+            'binary_data' (ndarray)
+                - Iterating over the unique classes, classification data
+                  is turned into 1 or 0 if it matches the given class.
+                  See method 'get_binary_mapping_per_class()'.
+            'full' (tuple)
+                - All options listed above. (Default)
 
         Returns
         -------
-        _class_col_: array
-            Array with original classification data.
-        _unique_class_keys_: array
-            Unique classes found in the classification data.
-        _class_col_to_ids_: array
-            Array where the original classification data has been
-            replaced with their respective class IDs (integers).
-        _class_id_mapping_: dict
-            Dictionary with the mapping between a classification
-            from the original data set and its class ID.
-        _binary_data_: ndarray
-            Iterating over the unique classes, classification data
-            is turned into 1 or 0 if it matches the given class.
-            Also see 'get_binary_mapping_per_class()'.
+        class_data: tuple, ndarray, dict
+            An object containing the specified classification data.
+            Will return tuple of len(what_data) if a list is passed. (default is 5)
         """
-        out1 = self._class_col_   # simply the class column
-        out2 = self._unique_class_keys_  # unique values in class column
-        out3 = self._class_col_to_ids_  # class column but class strings turned into integers (class IDs)
-        out4 = self._class_id_mapping_  # maps between a class ID and the original class string
-        _binary_data_ = self.get_binary_mapping_per_class() # for all classes, 1 where that class, 0 else
-        return out1, out2, out3, out4, _binary_data_
+        binary_class_data = self.get_binary_mapping_per_class()
+        data_dict = {"class_col":self._class_col_,  # simply the class column
+                     "unique_class_keys":self._unique_class_keys_,  # unique values in class column
+                     "class_col_to_ids":self._class_col_to_ids_,  # class column but class strings turned into integers (class IDs)
+                     "class_id_mapping":self._class_id_mapping_,  # maps between a class ID and the original class string
+                     "binary_data":binary_class_data,  # for all classes, 1 where that class, 0 else
+                     "full":tuple([self._class_col_,self._unique_class_keys_,self._class_col_to_ids_, \
+                                   self._class_id_mapping_, binary_class_data]) }
+        if isinstance(what_data, str):
+            class_data = data_dict[ what_data.lower() ]
+        elif isinstance(what_data, list):
+            class_data = tuple([data_dict[i.lower()] for i in what_data])
+        else:
+            raise ValueError("'{0}' not supported. Try {1}.".format(what_data, data_dict.keys()))
+        return class_data
 
+    def get_regr_data(self, what_data="full"):
+        """Get data related to regression all sorted by class in dictionaries.
 
-    def get_all_regr_data(self,):
-        """Get all data related to regression.
-
-        Since each class can have its own unique set of regression data,
-        the data is sorted in dictionaries where the classification
-        is the key to that set of regression data.
+        Parameters
+        ----------
+        what_data: str, list, optional
+            'input' - For each class, the input data with no cleaning.
+            'raw_output' - For each class, the output data with no cleaning.
+            'output' - For each class, the cleaned output data.
+            'full' - All options listed above in that respective order. (Default)
 
         Returns
         -------
-        _regr_inputs_: dict
-            For each class, the input data with no cleaning.
-        _regr_outputs_: dict
-            For each class, the output data with no cleaning.
-        _regr_dfs_per_class_: dict
-            For each class, cleaned output data.
-            Cleaned meaning only values that can be converted
-            to floats and that are not Nan.
+        data: tuple, ndarray or DataFrame
+            An object containing the specified regression data.
+            Will return tuple of len(what_data) if a list is passed. (default is 3)
         """
-        out1 = self._regr_inputs_
-        out2 = self._regr_outputs_
-        out3 = self._regr_dfs_per_class_
-        return out1, out2, out3
-
+        data_dict = {"input":self._regr_inputs_,
+                     "raw_output":self._regr_outputs_,
+                     "output":self._regr_dfs_per_class_,
+                     "full":tuple([self._regr_inputs_, self._regr_outputs_, self._regr_dfs_per_class_]) }
+        if isinstance( what_data, str ):
+            regr_data = data_dict[ what_data.lower() ]
+        elif isinstance( what_data , list):
+            regr_data = tuple( [data_dict[i.lower()] for i in what_data] )
+        else:
+            raise ValueError("'{0}' not supported. Try {1}.".format(what_data, data_dict.keys()))
+        return regr_data
 
     def info(self):
-        """Print info for the TableData object. For descriptions see 'get_info()'."""
+        """Print info for the instance of TableData object.
+        For output descriptions see the method 'get_info()'. """
         print( "File List: \n{0}".format(np.array(self._files_)) )
         print( "df Index Keys: \n{0}\n".format(np.array(self._df_index_keys_)) )
-        print("---- VERBOSE OUTPUT ----")
+        print("---- VERBOSE OUTPUT START ----")
         print( *self._for_info_, sep = '\n' )
-
+        print("---- VERBOSE OUTPUT  END  ----")
 
     def get_info(self):
         """Returns what info is printed in the 'info()' method.
 
         Returns
         -------
-        _files_: list
+        files: list
             File paths where data was loaded from.
-        _df_index_keys_: list
+        df_index_keys: list
             Index keys added to the DataFrame object once
             multiple files are joined together such that one can
             access data by file after they were joined.
-        _for_info_: list
+        for_info: list
             Running list of print statements that include but
             are not limited to what is shown if 'verbose=True'.
         """
-        out1 = self._files_
-        out2 = self._df_index_keys_
-        out3 = self._for_info_
-        return out1, out2, out3
+        return tuple( [self._files_, self._df_index_keys_, self._for_info_] )
 
 
     # # *****************
@@ -664,7 +763,7 @@ class TableData():
         else:
             colors = self._class_colors_
 
-        color_dict = dict()
+        color_dict = OrderedDict()
         for j, color_str in enumerate(colors):
             color_dict[j] = color_str
 
@@ -699,7 +798,17 @@ class TableData():
         if save_fig: plt.savefig( "data_plot_{0}.pdf".format(plt_str), bbox_inches='tight')
         return fig
 
-        
-    def add_class_data_plot(self, fig, ax, which_ax=(0)):
-        ax[which_ax].plot( np.random.rand(10) )
+
+    def make_class_data_plot(self, fig, ax, axes_keys, **kwargs ):
+        """ Currently no slicing! """
+        color_dict = OrderedDict()
+        for j, color_str in enumerate(self._class_colors_):
+            color_dict[j] = color_str
+
+        class_to_colors = [color_dict[val] for val in self._class_col_to_ids_ ]
+
+        ax.scatter( self._input_[axes_keys[0]], self._input_[axes_keys[1]],
+                    c = class_to_colors , **kwargs )
+        ax.set_xlabel(axes_keys[0])
+        ax.set_ylabel(axes_keys[1])
         return fig, ax

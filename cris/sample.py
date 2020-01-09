@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import time
 import sys
+from collections import OrderedDict
 
 import scipy.stats
 from scipy.spatial.distance import pdist
@@ -33,7 +34,7 @@ class Sampler():
             # self._max_vals_, self._min_vals_ = self._Classifier_.get_data_bounds()
 
         # You can save chains_history in here
-        self._chain_step_hist_holder_ = dict()
+        self._chain_step_hist_holder_ = OrderedDict()
 
         self._MAX_APC_str_ = []
 
@@ -175,7 +176,7 @@ class Sampler():
             print("Temperatures: {0}\n".format(T_list) )
 
         # data storage
-        chain_holder = dict()
+        chain_holder = OrderedDict()
         for i in range( len(T_list) ):
             chain_holder[i] = []
 
@@ -259,7 +260,7 @@ class Sampler():
             # to read into MCMC on next iteration!!!
             this_iter_step_loc = last_step_holder
 
-        chain_step_history = dict()
+        chain_step_history = OrderedDict()
         for pos, steps in chain_holder.items():
             chain_step_history[pos] = np.concatenate(steps)
 
@@ -602,7 +603,7 @@ class Sampler():
             print( "Kappas: \n{0}".format(np.array(good_kappas)) )
             print( "loc: {0}".format(where_best_distribution) )
 
-            self.make_prop_points_plots(step_history, best_acc_pts) # doesn't work yet
+            #self.make_prop_points_plots(step_history, best_acc_pts) # doesn't work yet
 
         return best_acc_pts, best_Kappa
 

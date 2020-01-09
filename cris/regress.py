@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import time
+from collections import OrderedDict
 
 # -------- regressors --------
 from scipy.interpolate import LinearNDInterpolator
@@ -29,16 +30,22 @@ class Regressor():
     Regressor
     =========
 
+    Perform regression and interpolation with a variety of different
+    regression algorithms.
+
     Parameters
     ----------
+    TableData_object : instance of <class, TableData>
+        An instance of the TableData class.
+
 
     ADD DOCS
     """
 
     def __init__(self, table_data):
-        self._TableData_ = table_data
+        self._TableData_ = TableData_object
 
-        holder = self._TableData_.get_all_regr_data()
+        holder = self._TableData_.get_regr_data(what_data='full')
         self.input_dict = holder[0] #_regr_inputs_
         self.output_dict = holder[1] #_regr_outputs_
         self.regr_dfs_per_class = holder[2] #_regr_dfs_per_class_
@@ -49,7 +56,7 @@ class Regressor():
         self._log_history_ = makehash()
         self._cv_log_history = makehash()
 
-        self.__train_cross_val = False # need to still update everything
+        self.__train_cross_val = False # TODO: need to still update everything
         self.__all_diffs_holder = makehash()
         self.__all_Pchange_holder = makehash()
 
@@ -63,6 +70,7 @@ class Regressor():
                 self.train(regr_name, [class_name], None, verbose=verbose)
         if verbose:
             print("\nDone Regrssor train_everything.")
+        return None
 
 
     def train(self, regressor_name, class_keys, col_keys, di = None, verbose = False, train_cross_val = False ):
@@ -107,7 +115,7 @@ class Regressor():
 
         if verbose:
             print("\tEXIT TRAIN\n")
-        return
+        return None
 
 
     def fit_linear_ND_interpolator(self, class_keys, col_keys, data_interval = None, verbose = False):
@@ -116,10 +124,10 @@ class Regressor():
             print("--- Fit LinearNDInterpolator ---")
 
         start_time = time.time()
-        regressor_holder = dict()
+        regressor_holder = OrderedDict()
 
         for class_key in class_keys:
-            this_class_dict = dict() # will hold columns
+            this_class_dict = OrderedDict() # will hold columns
 
             # extract the output data associated with class_key
             which_class_data = self.regr_dfs_per_class[class_key]
@@ -154,10 +162,10 @@ class Regressor():
             print("--- Fit RBF ---")
 
         start_time = time.time()
-        regressor_holder = dict()
+        regressor_holder = OrderedDict()
 
         for class_key in class_keys:
-            this_class_dict = dict() # will hold columns
+            this_class_dict = OrderedDict() # will hold columns
 
             # extract the output data associated with class_key
             which_class_data = self.regr_dfs_per_class[class_key]
@@ -202,10 +210,10 @@ class Regressor():
 
         n_restarts = 3
 
-        regressor_holder = dict()
+        regressor_holder = OrderedDict()
 
         for class_key in class_keys:
-            this_class_dict = dict() # will hold columns
+            this_class_dict = OrderedDict() # will hold columns
 
             # extract the output data associated with class_key
             which_class_data = self.regr_dfs_per_class[class_key]
@@ -248,13 +256,13 @@ class Regressor():
         """Dicts the same format as the regression objects but instead
         the are filled with the regressed output!"""
 
-        predictions = dict()
+        predictions = OrderedDict()
 
         for regr_name in regressor_names:
             regr_key = self.get_regressor_name_to_key(regr_name)
-            this_class_dict = dict()
+            this_class_dict = OrderedDict()
             for class_key in class_keys:
-                these_cols_dict = dict()
+                these_cols_dict = OrderedDict()
 
                 for col_key in col_keys:
                     pred_vals = self._predict( regr_key, class_key, col_key, test_input, \
@@ -314,12 +322,12 @@ class Regressor():
             key = "GaussianProcessRegressor"
         else:
             print("No regressor with name '%s'."%name)
-            return
+            return None
         return key
 
 
-    # def get_structure(arg):
-    #     pass
+    # def get_structure(self, args):
+    #     return None
 
 
     def make_cross_val_data(self, class_key, col_key, alpha):
@@ -481,14 +489,11 @@ class Regressor():
         else:
             # nan value, return zero
             return 0
-
         all_cols = self.regr_dfs_per_class[regressor_key]
 
 
     def mult_diffs(self, regressor_name, class_key, col_keys, alpha, cutoff, verbose = False):
-
         #col_keys = self.regr_dfs_per_class[class_key].keys()
-
         if verbose:
             print("MULT DIFFS:",regressor_name, col_keys)
 
@@ -562,9 +567,9 @@ class Regressor():
                 subs[k,i].plot( data_x, data_y, '.' )
                 subs[k,i].set_xlabel( key_in[i] )
                 subs[k,i].set_ylabel( key_out[k] )
-
         fig.tight_layout()
         plt.show()
+        return None
 
 
     def get_rnd_test_inputs(self, class_name, N, other_rng=dict(), verbose=False):
@@ -617,5 +622,4 @@ class Regressor():
 
         # now put the random points back together with same shape as input_data
         rnd_test_points = np.concatenate( axis_rnd_points, axis = 1  )
-
         return rnd_test_points
