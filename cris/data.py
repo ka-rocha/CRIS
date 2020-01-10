@@ -155,7 +155,7 @@ class TableData():
 
     Attributes
     ----------
-
+    
     Methods
     -------
     """
@@ -426,7 +426,7 @@ class TableData():
             input_data = self._regr_dfs_per_class_[key]
         if isinstance( input_data, pd.DataFrame ):
             input_data = input_data.values
-        elif isinstance( input_data, list() ):
+        elif isinstance( input_data, list ):
             input_data = np.array(input_data)
         elif isinstace( input_data, np.array() ):
             pass
@@ -621,98 +621,8 @@ class TableData():
         return tuple( [self._files_, self._df_index_keys_, self._for_info_] )
 
 
-    # # *****************
-    # def get_full_data(self, return_df = False):
-    #     """Get all data contained in DataTable object.
-    #
-    #     ! DEPRICATED - use get_data(what_data='full')
-    #
-    #     Parameters
-    #     ----------
-    #     return_df: bool, optional, default = False
-    #         If True, return a pandas DataFrame object.
-    #         If False, return a numpy array.
-    #
-    #     Returns
-    #     -------
-    #     full_data: ndarray
-    #         An array containing all data from loaded files
-    #         that has not been already removed in pre-processing.
-    #     """
-    #     if return_df:
-    #         return self._full_data_
-    #     else:
-    #         return self._full_data_.values
-    # # *****************
-    #
-    # # *****************
-    # #def get_input_data(self,return_df=False):
-    #     """Get all input data.
-    #
-    #     ! DEPRICATED - use get_data(what_data='input')
-    #
-    #     Parameters
-    #     ----------
-    #     return_df: bool, optional
-    #         If True, return a pandas DataFrame object.
-    #         If False (default), return a numpy array.
-    #
-    #     Returns
-    #     -------
-    #     input_data: ndarray
-    #         An array containing all input data.
-    #     """
-    #     if return_df:
-    #         return self._input_
-    #     else:
-    #         return self._input_.values
-    # # *****************
-    #
-    # # *****************
-    # def get_output_data(self,return_df=False):
-    #     """! DEPRICATED - use get_data(what_data='output')"""
-    #     if return_df:
-    #         return self._output_
-    #     else:
-    #         return self._output_.values
-    # # *****************
-    #
-    # # *****************
-    # def get_classes_to_ids(self,):
-    #     """DEPRICATED - use get_class_data -> _class_col_to_ids_"""
-    #     return None
-    # # *****************
-    #
-    # # *****************
-    # def get_class_names(self,):
-    #     """ ! DEPRICATED - use get_class_data -> _unique_class_keys_ """
-    #     return None
-    # # *****************
-    #
-    # # *****************
-    # def get_regr_input_data(self,):
-    #     """DEPRICATED - use get_all_regr_data -> _regr_inputs_
-    #     Return: dict """
-    #     return self.regr_inputs_
-    # # *****************
-    #
-    # # *****************
-    # def get_regr_output_data(self,):
-    #     """DEPRICATED - use get_all_regr_data -> _regr_outputs_
-    #     Return: dict """
-    #     return self.regr_outputs_
-    # # *****************
-    #
-    # # *****************
-    # def get_regr_sorted_output_data(self,):
-    #     """DEPRICATED - use get_all_regr_data -> _regr_dfs_per_class_
-    #     Return: dict """
-    #     return self._regr_dfs_per_class_
-    # # *****************
-
-
-    def plot_3D_class_data(self, axes=None, fig_size = (4,5), mark_size = 12, \
-                            which_val = 0, save_fig=False, plt_str='0', \
+    def plot_3D_class_data(self, axes=None, fig_size = (4,5), mark_size = 12,
+                            which_val = 0, save_fig=False, plt_str='0',
                             color_list=None):
         """Plot the 3D classification data in a 2D plot.
         3 input axis with classification output.
@@ -803,12 +713,54 @@ class TableData():
     def make_class_data_plot(self, fig, ax, axes_keys, my_slice_vals=None,
                             my_class_colors=None, return_legend_handles=False,
                             verbose=False, **kwargs ):
-        """ Currently no slicing! But should work for any 2 input axes. """
+        """Plot classification data on a given axis and figure.
+
+        Parameters
+        ----------
+        fig : Matplotlib Figure object
+            Figure on which the plot will be made.
+        ax : Matplotlib Axis object
+            Axis on which a scatter plot will be drawn.
+        axes_keys : list
+            List containing two names of input data columns to use as horizontal
+            and verital axes.
+        my_slice_vals : optional, list, dict
+            List giving values on which to slice in the axes not being plotted.
+            Default (None) uses the first unique value found in each axis.
+            If instead of individual values, a range is desired (e.g. 10 +/- 1)
+            then a dict can be given with integer keys mapping to a tuple with
+            the lower and upper range. ( e.g. {0:(9,11)} )
+        my_class_colors : optional, list
+            List of colors used to represent different classes. Default (None)
+            uses the default class colors.
+        return_legend_handles : optional, bool
+            Returns a list of handles that connect classes to colors.
+        verbose : optional, bool
+            Print useful information during runtime.
+        **kwargs : optional
+            Kwargs for matplotlib.pyplot.scatter() .
+
+        Returns
+        -------
+        fig : Matplotlib Figure object
+            Figure object.
+        ax : Matplotlib Axis object
+            Updated axis after plotting.
+        handles : optional, list
+            List of legend handles connecting classes and their colors.
+            Returned if 'return_legend_handles' is True. Default is False.
+
+
+        Note: If instead of slicing on an individual value, you wanted
+        to slice in a range (10 +/- 0.5), this function could be modified to do
+        so. Look for the variable "where_this_val" in the source and insert the
+        apropriate logic.
+        """
         # Converting class ids to colors for plotting
         if my_class_colors is None:
             class_colors = self._class_colors_
         else:
-            if not isinstance(my_class_colors, (list, np.array) ):
+            if not isinstance(my_class_colors, (list, np.ndarray) ):
                 raise ValueError("'my_class_colors' takes a list of strings")
             if verbose: print("Using my_class_colors...")
             class_colors = my_class_colors
@@ -853,7 +805,13 @@ class TableData():
                     if len(my_slice_vals) != len(slicing_axes):
                         raise ValueError( "Need {0} slice value(s) and {1} given.".format(len(slicing_axes),len(my_slice_vals)) )
                     if verbose: print( "\tSlice val: '{1}'".format(slice_axis, my_slice_vals[j]) )
-                    where_this_val = np.array(self._input_[slice_axis] == my_slice_vals[j])
+                    if isinstance( my_slice_vals, (list,np.ndarray) ):
+                        where_this_val = np.array(self._input_[slice_axis] == my_slice_vals[j])
+                    elif isinstance( my_slice_vals, (dict, OrderedDict) ):
+                        where_this_val = np.array( (self._input_[slice_axis] >= my_slice_vals[j][0]) &
+                                                   (self._input_[slice_axis] <= my_slice_vals[j][1]) )
+                    else:
+                        raise ValueError( "'my_slice_vals' must be list or dict, {0} given.".format(type(my_slice_vals)) )
                 running_bool_list.append( where_this_val ) # for one axis
             all_results = np.array(running_bool_list).T # this is now (N_points x N_slice_axes)
             # For a point (row), True if all other axes contain the slice values
