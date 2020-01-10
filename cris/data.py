@@ -113,7 +113,7 @@ class TableData():
         ...
 
         The above table has dashes '-' in output columns to indicate Nan values.
-        You may have similar structure if different classes have fundamentally
+        You may have a similar structure if different classes have fundamentally
         different outputs.
 
     Parameters
@@ -145,7 +145,7 @@ class TableData():
         calculate average distances. (default None)
     neighbor : instance of sklearn.neighbors.NearestNeighbors, optional
         To use for average distances. See function 'calc_avg_dist()'.
-    undefined_p_change_val : optional
+    undefined_p_change_val : optional, float
         Sets the undefined value used when calculating percent change fails
         due to zero values in the output data. Default (None) uses nan.
     verbose : bool, optional
@@ -341,6 +341,7 @@ class TableData():
 
 
         # take Nearest Neighbors differences
+        self._undefined_p_change_val_ = undefined_p_change_val
         if n_neighbors is not None:
             info_str_14 = "\nCalculate Average Distances & Average Percent Change"
             self.__vb_helper(verbose, info_str_14)
@@ -374,7 +375,7 @@ class TableData():
                                 continue
                         # Take percent difference
                         avg_p_change = calc_avg_p_change(data, where_nearest_neighbors,
-                                                        undefined_p_change_val=undefined_p_change_val)
+                                                        undefined_p_change_val=self._undefined_p_change_val_)
                         if avg_p_change is None:
                             self.__vb_helper(verbose, "None in avg_p_change!? This shouldn't happen...")
                         else:
@@ -477,7 +478,7 @@ class TableData():
         if return_df:
             return my_data
         else:
-            return data.values
+            return my_data.values
 
     def get_binary_mapping_per_class(self,):
         """Get binary mapping (0 or 1) of the class data for each unique
@@ -799,16 +800,80 @@ class TableData():
         return fig
 
 
-    def make_class_data_plot(self, fig, ax, axes_keys, **kwargs ):
-        """ Currently no slicing! """
+    def make_class_data_plot(self, fig, ax, axes_keys, my_slice_vals=None,
+                            my_class_colors=None, return_legend_handles=False,
+                            verbose=False, **kwargs ):
+        """ Currently no slicing! But should work for any 2 input axes. """
+        # Converting class ids to colors for plotting
+        if my_class_colors is None:
+            class_colors = self._class_colors_
+        else:
+            if not isinstance(my_class_colors, (list, np.array) ):
+                raise ValueError("'my_class_colors' takes a list of strings")
+            if verbose: print("Using my_class_colors...")
+            class_colors = my_class_colors
+
         color_dict = OrderedDict()
-        for j, color_str in enumerate(self._class_colors_):
+        for j, color_str in enumerate(class_colors):
             color_dict[j] = color_str
+        class_to_colors = np.array([color_dict[val] for val in self._class_col_to_ids_])
 
-        class_to_colors = [color_dict[val] for val in self._class_col_to_ids_ ]
+        # Legend Handles (if desired)
+        # For single plot, recomended kwarg: bbox_to_anchor = (1.03, 1.02)
+        legend_elements = []
+        for i, name in enumerate(self._unique_class_keys_):
+            legend_elements.append( Line2D([], [], marker='s', color=color_dict[i],
+                                           label=name, linestyle='None', markersize=8)  )
 
-        ax.scatter( self._input_[axes_keys[0]], self._input_[axes_keys[1]],
-                    c = class_to_colors , **kwargs )
-        ax.set_xlabel(axes_keys[0])
-        ax.set_ylabel(axes_keys[1])
-        return fig, ax
+        # Seperate the plotting and slicing axes
+        all_input_axes = self._input_.keys()
+        num_dim = len(all_input_axes)
+        plotting_axes = [i for i in all_input_axes if i in axes_keys]
+        slicing_axes = [i for i in all_input_axes if i not in axes_keys]
+        # Check that user provided valid axes
+        for ax_key in axes_keys:
+            if ax_key not in all_input_axes:
+                raise KeyError( ax_key )
+
+        # Slicing algorithm
+        # By default slice along the first unique element in all non-plotting axes.
+        # We want to plot data in a constant hyperplane. That is all points with the
+        # same values in all extra dimensions.
+        if num_dim >= 3:
+            running_bool_list = []
+            for j, slice_axis in enumerate(slicing_axes):
+                unique_vals = np.unique( self._input_[slice_axis] )
+                if verbose:
+                    print( "Slice Axis: '{0}'".format(slice_axis))
+                    print( "\tUnique values: {0}".format(len(unique_vals)) )
+                if my_slice_vals is None:
+                    if verbose: print( "\tSlice value: '{1}'".format(slice_axis, unique_vals[0]) )
+                    where_this_val = np.array(self._input_[slice_axis] == unique_vals[0])
+                else:
+                    if len(my_slice_vals) != len(slicing_axes):
+                        raise ValueError( "Need {0} slice value(s) and {1} given.".format(len(slicing_axes),len(my_slice_vals)) )
+                    if verbose: print( "\tSlice val: '{1}'".format(slice_axis, my_slice_vals[j]) )
+                    where_this_val = np.array(self._input_[slice_axis] == my_slice_vals[j])
+                running_bool_list.append( where_this_val ) # for one axis
+            all_results = np.array(running_bool_list).T # this is now (N_points x N_slice_axes)
+            # For a point (row), True if all other axes contain the slice values
+            rows_where_all_true = np.array([i.all() for i in all_results])
+
+            x_data = self._input_[axes_keys[0]].loc[rows_where_all_true]
+            y_data = self._input_[axes_keys[1]].loc[rows_where_all_true]
+            class_to_colors = class_to_colors[rows_where_all_true]
+            if verbose:
+                print( "\tN total points: {0}".format(len(self._input_[axes_keys[0]])) )
+                print( "\tN points in hyperplane: {0}\n".format(np.sum(rows_where_all_true)) )
+        else:
+            x_data = self._input_[axes_keys[0]]
+            y_data = self._input_[axes_keys[1]]
+
+        # The actual plotting
+        ax.scatter( x_data, y_data, c = class_to_colors , **kwargs )
+        ax.set_xlabel( axes_keys[0] ); ax.set_ylabel( axes_keys[1] )
+
+        if return_legend_handles:
+            return fig, ax, legend_elements
+        else:
+            return fig, ax
