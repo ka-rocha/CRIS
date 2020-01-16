@@ -155,7 +155,7 @@ class TableData():
 
     Attributes
     ----------
-    
+
     Methods
     -------
     """
@@ -620,7 +620,6 @@ class TableData():
         """
         return tuple( [self._files_, self._df_index_keys_, self._for_info_] )
 
-
     def plot_3D_class_data(self, axes=None, fig_size = (4,5), mark_size = 12,
                             which_val = 0, save_fig=False, plt_str='0',
                             color_list=None):
@@ -709,7 +708,6 @@ class TableData():
         if save_fig: plt.savefig( "data_plot_{0}.pdf".format(plt_str), bbox_inches='tight')
         return fig
 
-
     def make_class_data_plot(self, fig, ax, axes_keys, my_slice_vals=None,
                             my_class_colors=None, return_legend_handles=False,
                             verbose=False, **kwargs ):
@@ -749,12 +747,6 @@ class TableData():
         handles : optional, list
             List of legend handles connecting classes and their colors.
             Returned if 'return_legend_handles' is True. Default is False.
-
-
-        Note: If instead of slicing on an individual value, you wanted
-        to slice in a range (10 +/- 0.5), this function could be modified to do
-        so. Look for the variable "where_this_val" in the source and insert the
-        apropriate logic.
         """
         # Converting class ids to colors for plotting
         if my_class_colors is None:
