@@ -14,7 +14,7 @@ from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
 # -----------------------------
 
 
-LinearNDInterpolator_names = ["linear", "linearndinterpolator","linear nd interpolator"]
+LinearNDInterpolator_names = ["linear", "lin", "linearndinterpolator","linear nd interpolator"]
 RBF_names = ["rbf", "radialbasisfunction", "radial basis function"]
 GaussianProcessRegressor_names = ["gp", "gpr", "gaussianprocessregressor"]
 
@@ -39,16 +39,19 @@ class Regressor():
         An instance of the TableData class.
 
 
-    ADD DOCS
+    Methods
+    -------
     """
 
-    def __init__(self, table_data):
+    def __init__(self, TableData_object):
         self._TableData_ = TableData_object
 
         holder = self._TableData_.get_regr_data(what_data='full')
         self.input_dict = holder[0] #_regr_inputs_
         self.output_dict = holder[1] #_regr_outputs_
         self.regr_dfs_per_class = holder[2] #_regr_dfs_per_class_
+
+        self._undefined_p_change_val_ = self._TableData_._return_data_("undefined_p_change_val")
 
         self._regressors_ = makehash()
         self._cv_regressors_ = makehash()
@@ -57,11 +60,24 @@ class Regressor():
         self._cv_log_history = makehash()
 
         self.__train_cross_val = False # TODO: need to still update everything
-        self.__all_diffs_holder = makehash()
-        self.__all_Pchange_holder = makehash()
+        self.__all_diffs_holder = makehash() # TODO: not sure how I wanted these to work...
+        self.__all_Pchange_holder = makehash() # TODO: not sure how I wanted these to work...
+
 
     def train_everything(self, regressor_names, verbose=False):
-        """Train all classes and columns with the specified list of regressor names."""
+        """Train all classes and columns with the specified list of regressor names.
+
+        Parameters
+        ----------
+        regressor_names : list
+            List of strings specifying all the regressors to train.
+        verbose : optional, bool
+            Print useful information.
+
+        Returns
+        -------
+        None
+        """
         for regr_name in regressor_names:
             if verbose:
                 print("Regressor: {0}".format(regr_name))
@@ -69,17 +85,51 @@ class Regressor():
             for class_name in class_keys:
                 self.train(regr_name, [class_name], None, verbose=verbose)
         if verbose:
-            print("\nDone Regrssor train_everything.")
+            print("\nDone Regressor train_everything.")
         return None
 
 
-    def train(self, regressor_name, class_keys, col_keys, di = None, verbose = False, train_cross_val = False ):
+    def train(self, regressor_name, class_keys, col_keys, di = None, verbose = False ):
         """Train a regression algorithm.
 
-        Can choose mutliple classes / columns at once as long as
-        they have the same columns.
+        Implemented regressors:
+            LinearNDInterpolator ('linear', ...)
+            Radial Basis Function ('rbf', ...)
+            GaussianProcessRegressor ('gp', ...)
 
-        if col_keys is None then it trains on all columns in one class.
+        >>> rg = Regressor( TableData_object )
+        >>> rg.train( 'linear', di = np.arange(0, Ndatapoints, 5), verbose=True )
+
+        Trained regressor objects are uniquely defined by the algorithm used to
+        train, the data set used to train (grouped by class), and finally the
+        output column (there could be more than one). This motivates the data
+        structure for storing the regressor objects as follows:
+            Algorithm -> Class -> Output Column -> Object
+        Here is more realistic example of what it could look like:
+            {RBF: {"class_1": {"output_1": {instance of scipy.interpolate.rbf} } } }
+
+        Parameters
+        ----------
+        regressor_name : string
+            Name of regressor to train.
+        class_keys : list
+            List of class(es) to train on.
+        col_keys : list or None
+            For a given class, what columns to train on.
+            If None, it trains on all columns in one class.
+        di : optional, array
+            Array indicies of data used to train (training on a subset).
+            If None (default) - train on whole data set
+        verbose : optional, bool
+            Print statements with more information while training.
+
+        Returns
+        -------
+        None
+
+
+        Note: You can train mutliple classes at once as long as they have the same
+        columns specified in col_keys.
         """
         regressor_key = self.get_regressor_name_to_key(regressor_name)
 
@@ -94,7 +144,7 @@ class Regressor():
                     print("No regression data for {0}.".format(class_keys[0]))
                 return
 
-        if   regressor_key == "LinearNDInterpolator":
+        if regressor_key == "LinearNDInterpolator":
             regr_holder = self.fit_linear_ND_interpolator( class_keys, col_keys, data_interval = di, verbose = verbose )
         elif regressor_key == "RBF":
             regr_holder = self.fit_rbf_interpolator( class_keys, col_keys, data_interval = di, verbose = verbose )
@@ -108,7 +158,7 @@ class Regressor():
             for col_key, interpolated_obj in class_dict.items():
                 if verbose:
                     print('\tdict loc: {0}, {1}, {2},'.format(regressor_key, class_key, col_key) )
-                if train_cross_val:
+                if self.__train_cross_val:
                     self._cv_regressors_[regressor_key][class_key][col_key] = interpolated_obj
                 else:
                     self._regressors_[regressor_key][class_key][col_key] = interpolated_obj
@@ -118,8 +168,52 @@ class Regressor():
         return None
 
 
+    def _get_cleaned_regression_data_(self, training_x, training_y, class_key, col_key):
+        """Given a set of training data, the output is checked for nans and user
+        specified undefined_p_change_val. All instances are removed before training.
+        Returns the new training input and output data: training_x, training_y"""
+        if np.sum(np.isnan(training_y))>0:
+            where_undef = np.where( np.isnan(training_y) == True )[0]
+            where_def = np.where( np.isnan(training_y) == False )[0]
+            need_to_clean = True
+        elif self._undefined_p_change_val_ in training_y:
+            where_undef = np.where( self._undefined_p_change_val_ == training_y )[0]
+            where_def = np.where( self._undefined_p_change_val_ != training_y )[0]
+            need_to_clean = True
+        else:
+            need_to_clean = False
+        if need_to_clean:
+            print("Not training on {0} value(s) in {1}, {2}.".format(len(where_undef), class_key, col_key))
+            training_x = training_x[where_def]
+            training_y = training_y[where_def]
+        return training_x, training_y
+
+
     def fit_linear_ND_interpolator(self, class_keys, col_keys, data_interval = None, verbose = False):
-        """See GRP"""
+        """Fit linear ND interpolator - linear interpolation between data points in N dimensions
+        implementation from: scipy.interpolate.LinearNDInterpolator
+        (https://docs.scipy.org/doc/scipy/reference/interpolate.html)
+
+        Parameters
+        ----------
+        class_keys : list
+            List of classes to train on.
+        col_keys : list
+            List of columns in the class to train on.
+            If multiple classes are given, it is assumed they all contain
+            the supplied columns.
+        data_interval : array, optional
+            Array indicies of data used to train (training on a subset).
+            If None (default) train on whole data set
+        verbose : bool, optional
+            Print statements with more information while training.
+
+        Returns
+        -------
+        regressor_holder : dict
+            Ordered by class specific data and then by column. Nested dictionary
+            maps to a trained linearNDinterpolator object.
+        """
         if verbose:
             print("--- Fit LinearNDInterpolator ---")
 
@@ -142,6 +236,9 @@ class Regressor():
                     training_x = self.input_dict[class_key].to_numpy(float)[di]
                     training_y = which_class_data[col_key].to_numpy(float)[di]
 
+                # if any undefined_p_change_val in regression data, it's removed
+                training_x, training_y = self._get_cleaned_regression_data_(training_x, training_y, class_key, col_key)
+
                 if verbose:
                     print("%s: %s - %.0f training points"%(class_key, col_key, len(training_x)) )
 
@@ -151,13 +248,34 @@ class Regressor():
             regressor_holder[class_key] = this_class_dict
 
         if verbose:
-            print("--- Done in {0:.2f} seconds. ---".format( time.time() - start_time) )
-
+            print("--- Done in {0:.2f} seconds. ---".format(time.time()-start_time))
         return regressor_holder
 
 
     def fit_rbf_interpolator(self, class_keys, col_keys, data_interval = None, verbose = False):
-        """See GPR"""
+        """Fit RBF interpolator - binary classification (one against all)
+        implementation from: scipy.interpolate.Rbf
+        (https://docs.scipy.org/doc/scipy/reference/interpolate.html)
+
+        Parameters
+        ----------
+        class_keys :
+            List of classes to train on.
+        col_keys :
+            If multiple classes are given, it is assumed they all contain
+            the supplied columns.
+        data_interval : array, optional
+            Array indicies of data used to train (training on a subset).
+            if None (default) train on whole data set
+        verbose : bool, optional
+            Print statements with more information while training.
+
+        Returns
+        -------
+        regressor_holder : dict
+            Ordered by class specific data and then by column. Nested dictionary
+            maps to a trained RBF object.
+        """
         if verbose:
             print("--- Fit RBF ---")
 
@@ -180,6 +298,9 @@ class Regressor():
                     training_x = self.input_dict[class_key].to_numpy(float)[di]
                     training_y = which_class_data[col_key].to_numpy(float)[di]
 
+                # if any undefined_p_change_val in regression data, it's removed
+                training_x, training_y = self._get_cleaned_regression_data_(training_x, training_y, class_key, col_key)
+
                 argList = []
                 for col in range( len(training_x[0]) ):
                     argList.append( training_x.T[col] )
@@ -194,27 +315,44 @@ class Regressor():
             regressor_holder[class_key] = this_class_dict
 
         if verbose:
-            print("--- Done in %.2f seconds. ---"%( time.time() - start_time) )
+            print("--- Done in {0:.2f} seconds. ---".format(time.time()-start_time))
 
         return regressor_holder
 
 
     def fit_gaussian_process_regressor(self, class_keys, col_keys, data_interval = None, verbose = False):
-        """ Ok so this is gonna create a dict sorted by class and each
-        element is then another dict with the column names mapping to
-        gp regressor objects """
+        """Fit a Gaussian Process regressor
+        implementation from: sklearn.gaussian_process
+        (https://scikit-learn.org/stable/modules/gaussian_process.html)
+
+        Parameters
+        ----------
+        class_keys :
+            List of classes to train on.
+        col_keys :
+            If multiple classes are given, it is assumed they all contain
+            the supplied columns.
+        data_interval : array, optional
+            Array indicies of data used to train (training on a subset).
+            if None (default) train on whole data set
+        verbose : bool, optional
+            Print statements with more information while training.
+
+        Returns
+        -------
+        regressor_holder : dict
+            Ordered by class specific data and then by column. Nested dictionary
+            maps to a trained GaussianProcessRegressor object.
+        """
         if verbose:
             print("--- Fit GaussianProcessRegressor ---")
 
         start_time = time.time()
-
         n_restarts = 3
-
         regressor_holder = OrderedDict()
 
         for class_key in class_keys:
             this_class_dict = OrderedDict() # will hold columns
-
             # extract the output data associated with class_key
             which_class_data = self.regr_dfs_per_class[class_key]
 
@@ -228,36 +366,57 @@ class Regressor():
                     training_x = self.input_dict[class_key].to_numpy(float)[di]
                     training_y = which_class_data[col_key].to_numpy(float)[di]
 
+                # if any undefined_p_change_val in regression data, it's removed
+                training_x, training_y = self._get_cleaned_regression_data_(training_x, training_y, class_key, col_key)
+
                 if verbose:
                     print("%s: %s - %.0f training points"%( class_key, col_key, len(training_x)) )
 
                 num_dim = len(training_x[0])
                 starting_loc = [1 for i in range(num_dim)]
-                axis_range = axis_ranges = [ (1e-3,1e3) for i in range(num_dim) ]
+                axis_ranges = [ (1e-3,1e3) for i in range(num_dim) ]
                 #kernel = C( 1e3, (1e2, 5e4) ) * RBF( [ 10, 500, 300.], [(1e0,1e3), (1e0,1e3), (1e-1, 5e3)] )
                 kernel = gp.kernels.RBF( starting_loc, axis_ranges )
                 gpr = gp.GaussianProcessRegressor( kernel=kernel, n_restarts_optimizer = n_restarts )
 
-                #print("PRE-fit params:\n", gpr.kernel.get_params() ) # helpful for kernel things
+                if verbose:
+                    print(" PRE-fit params:\n{0}".format(gpr.kernel.get_params()) ) # helpful for kernel things
                 gpr.fit( training_x, training_y)
                 if verbose:
-                    print("POST-fit params:\n", gpr.kernel_.get_params() )
+                    print("POST-fit params:\n{0}".format(gpr.kernel_.get_params()) )
 
                 this_class_dict[col_key] = gpr
             regressor_holder[class_key] = this_class_dict
 
         if verbose:
-            print("--- Done in %.2f seconds. ---"%( time.time() - start_time) )
-
+            print("--- Done in {0:.2f} seconds. ---".format(time.time()-start_time))
         return regressor_holder
 
 
-    def get_predictions(self, regressor_names, class_keys, col_keys, test_input, return_std = False, cross_val = False):
-        """Dicts the same format as the regression objects but instead
-        the are filled with the regressed output!"""
+    def get_predictions(self, regressor_names, class_keys, col_keys, test_input, return_std = False):
+        """Get predictions from trained regressors for a set of input parameters.
+
+        Parameters
+        ----------
+        regressor_names : list
+            List of regressor algorithm names to use to predict.
+        class_keys : list
+            List of classes to get predictions for.
+        col_keys : list
+            List of columns to get predictions for.
+        test_input : ndarray
+            Array of input points for which predictions will be found.
+        return_std : optional, bool
+            Return the STD is when using GaussianProcessRegressor.
+
+        Returns
+        -------
+        predictions : dict
+            Dictionary ordered by algorithm, class, and output column mapping
+            to an array of predictions for the test input points.
+        """
 
         predictions = OrderedDict()
-
         for regr_name in regressor_names:
             regr_key = self.get_regressor_name_to_key(regr_name)
             this_class_dict = OrderedDict()
@@ -266,7 +425,7 @@ class Regressor():
 
                 for col_key in col_keys:
                     pred_vals = self._predict( regr_key, class_key, col_key, test_input, \
-                                            return_std = return_std, cross_val = cross_val )
+                                            return_std = return_std )
                     these_cols_dict[col_key] = pred_vals
 
                 this_class_dict[class_key] = these_cols_dict
@@ -275,7 +434,7 @@ class Regressor():
         return predictions
 
 
-    def _predict(self, regressor_name, class_key, col_key, test_input, return_std = False, cross_val = False):
+    def _predict(self, regressor_name, class_key, col_key, test_input, return_std = False):
 
         sigma = None # default
 
@@ -284,7 +443,7 @@ class Regressor():
 
         regressor_key = self.get_regressor_name_to_key(regressor_name)
 
-        if cross_val:
+        if self.__train_cross_val:
             interpolators = self._cv_regressors_[regressor_key]
         else:
             interpolators = self._regressors_[regressor_key]
@@ -326,26 +485,39 @@ class Regressor():
         return key
 
 
-    # def get_structure(self, args):
-    #     return None
+    def show_structure(self):
+        """Show the structure of the regression data."""
+        for outer_key, outer_val in self.regr_dfs_per_class.items():
+            print("CLASS: {0}".format(outer_key))
+            if isinstance(outer_val, pd.DataFrame):
+                print("\tCOLS:")
+                for mid_key, mid_val in outer_val.items():
+                    print("\t"+mid_key)
+        print("")
+        return None
 
 
-    def make_cross_val_data(self, class_key, col_key, alpha):
+    def get_cross_val_data(self, class_key, col_key, alpha):
         """Randomly sample the data set and seperate training and test data.
 
         Parameters
         ----------
-        class_key :
-        col_key :
+        class_key : str, class_dtype(int or other)
+            Class key specifying the class to get data from.
+        col_key : str
+            Column key specifying the output column to get data.
         alpha : float
             Fraction of data set to use for training. (0.05 = 5% of data set)
 
         Returns
         -------
+        cross_val_test_input_data : ndarray
+            Input data used to test after training on a subset.
+        cross_val_test_output_data : ndarray
+            Output data used to test after training on a subset.
         sorted_rnd_int_vals : array
-            Indicies which will be used as training points.
+            Indicies of original data that were used as training points.
         """
-
         num_points = int( len( self.input_dict[class_key] )*alpha )
         rnd_input_train = []; rnd_outout_train = []; rnd_int_vals = []
         rnd_int_set = set()
@@ -366,8 +538,8 @@ class Regressor():
         train_rnd_int_vals = np.array( sorted(rnd_int_vals) )
 
         # Random training data
-        self.cross_val_train_input_data = ( self.input_dict[class_key].to_numpy(float) )[train_rnd_int_vals,:]
-        self.cross_val_train_class_data = ( self.regr_dfs_per_class[class_key][col_key].to_numpy(float) )[train_rnd_int_vals]
+        cross_val_train_input_data = ( self.input_dict[class_key].to_numpy(float) )[train_rnd_int_vals,:]
+        cross_val_train_class_data = ( self.regr_dfs_per_class[class_key][col_key].to_numpy(float) )[train_rnd_int_vals]
 
         test_int_vals = []
         for i in range(len(self.input_dict[class_key])):
@@ -377,17 +549,39 @@ class Regressor():
                 test_int_vals.append( i )
 
         # The remainder which will be used to test fits
-        self.cross_val_test_input_data = (self.input_dict[class_key].to_numpy(float))[test_int_vals,:]
-        self.cross_val_test_output_data = (self.regr_dfs_per_class[class_key][col_key].to_numpy(float))[test_int_vals]
+        cross_val_test_input_data = (self.input_dict[class_key].to_numpy(float))[test_int_vals,:]
+        cross_val_test_output_data = (self.regr_dfs_per_class[class_key][col_key].to_numpy(float))[test_int_vals]
 
-        return train_rnd_int_vals, test_int_vals
+        return cross_val_test_input_data, cross_val_test_output_data, train_rnd_int_vals
 
 
     def cross_validate(self, regressor_name, class_key, col_key, alpha, verbose = False):
-        """This is not really cross validation - taking differences"""
-        self.__train_cross_val = True
+        """Our method of cross validation for regression. Train on a subset of the
+        data and predict values for the rest. Then calculate the difference between
+        the true and predicted value.
 
-        train_data_indicies, test_data_indicies = self.make_cross_val_data( class_key, col_key, alpha )
+        Parameters
+        ----------
+        regressor_name :
+            Regressor name to use for analysis.
+        class_key :
+            Class key to take differences.
+        col_key :
+            Column key to take differences.
+        alpha : float
+            Fraction of data set used to find differences.
+        verbose : bool, optional
+            Print useful information.
+
+        Returns
+        -------
+        percent_diffs : array
+            Percent difference.
+        diffs : array
+            Absolute difference.
+        """
+
+        cross_val_test_input, cross_val_test_output, train_data_indicies = self.get_cross_val_data( class_key, col_key, alpha )
 
         if verbose:
             print("alpha: %f, num_training_points %.0f"%(alpha, len(train_data_indicies)) )
@@ -396,58 +590,67 @@ class Regressor():
 
         # Train classifier
         start_time = time.time()
-        if regressor_key == "LinearNDInterpolator":
-            # if linear - train rbf to use if linear predicts nan
-            self.train( regressor_key, [class_key], [col_key], \
-                        di = train_data_indicies, train_cross_val = True,
-                        verbose = verbose  )
-            self.train( "RBF", [class_key], [col_key],\
-                        di = train_data_indicies, train_cross_val = True,
-                        verbose = verbose)
-        else:
-            self.train( regressor_key, [class_key], [col_key], \
-                        di = train_data_indicies, train_cross_val = True,
-                        verbose = verbose  )
-        time_to_train = time.time() - start_time
+        try:
+            self.__train_cross_val = True
+            if regressor_key == "LinearNDInterpolator":
+                # if linear - train rbf to use if linear predicts nan
+                self.train( regressor_key, [class_key], [col_key], \
+                            di = train_data_indicies, verbose = verbose )
+                self.train( "RBF", [class_key], [col_key],\
+                            di = train_data_indicies, verbose = verbose )
+            else:
+                self.train( regressor_key, [class_key], [col_key], \
+                            di = train_data_indicies, verbose = verbose )
+            time_to_train = time.time() - start_time
 
         # Make Predictions
-        if regressor_key == "LinearNDInterpolator":
-            predicted_values_linear = self._predict( regressor_key, class_key, col_key, \
-                                        self.cross_val_test_input_data, cross_val = True )
-            predicted_values_rbf = self._predict( "RBF", class_key, col_key, \
-                                     self.cross_val_test_input_data, cross_val = True )
-            where_nan = np.where( np.isnan(predicted_values_linear) )[0]
-            if len(where_nan) > 0:
-                print("{0}: {1} nan points out of {2}. Used rbf instead.".format(regressor_key, len(where_nan), len(predicted_values_linear)) )
-                predicted_values_linear[where_nan] = predicted_values_rbf[where_nan]
-            predicted_values = predicted_values_linear
-        else:
-            predicted_values = self._predict( regressor_key, class_key, col_key, \
-                                    self.cross_val_test_input_data, cross_val = True )
+            if regressor_key == "LinearNDInterpolator":
+                predicted_values_linear = self._predict( regressor_key, class_key, col_key, cross_val_test_input )
+                predicted_values_rbf = self._predict( "RBF", class_key, col_key, cross_val_test_input )
+                where_nan = np.where( np.isnan(predicted_values_linear) )[0]
+                if len(where_nan) > 0:
+                    print("{0}: {1} nan points out of {2}. Used rbf instead.".format(regressor_key, len(where_nan), len(predicted_values_linear)) )
+                    predicted_values_linear[where_nan] = predicted_values_rbf[where_nan]
+                predicted_values = predicted_values_linear
+            else:
+                predicted_values = self._predict( regressor_key, class_key, col_key, cross_val_test_input )
+        except:
+            self.__train_cross_val = False
+            print("FAILED DURING CROSS VAL PREDICT")
+            raise
+        self.__train_cross_val = False
 
         # Calculate the difference
-        diffs = predicted_values - self.cross_val_test_output_data
+        diffs = predicted_values - cross_val_test_output
 
-        where_zero = np.where( self.cross_val_test_output_data == 0 )[0] # 1d array
-        where_not_zero = np.where( self.cross_val_test_output_data != 0 )[0] # 1d array
+        where_zero = np.where( cross_val_test_output == 0 )[0] # 1d array
+        where_not_zero = np.where( cross_val_test_output != 0 )[0] # 1d array
 
         if len(where_zero) > 0:
-            percent_diffs = (diffs[where_not_zero] / self.cross_val_test_output_data[where_not_zero]) * 100
-            print("{0} output with value zero. Omitting for percent change calculation.".format(len(where_zero)))
+            percent_diffs = (diffs[where_not_zero] / cross_val_test_output[where_not_zero]) * 100
+            print("{0} output(s) with value zero. Omitting for percent change calculation.".format(len(where_zero)))
         else:
-            percent_diffs = (diffs / self.cross_val_test_output_data) * 100
+            percent_diffs = (diffs / cross_val_test_output) * 100
 
-        self.__train_cross_val = False
         return percent_diffs, diffs
 
-    #   Get it completley working!!!!!
-    #   Nearest Neighbors differences
-    #       extra_column = (%diff_1+%diff_2+%diff_3 +...)/N
-    #   do it in data.py
-    #   interpolate using regressors
-    #   update target distribution (add them)
-    #   - fix Milena's code (day max)
-    #   !!! :D
+
+    def get_max_APC_val(self, regressor_name, class_key, args):
+        """For a given class, and regression method. Return
+        the maximum apverage percent change value across all APC
+        APC columns in the class sorted data set."""
+        regr_column_names = self.regr_dfs_per_class[class_key].keys()
+        good_col_keys = [i for i in regr_column_names if "APC" in i] # columns with average percent change data
+
+        regr_key = self.get_regressor_name_to_key(regressor_name)
+        predictions = self.get_predictions( [regr_key], [class_key], good_col_keys, args )
+
+        dict_with_APC_data = predictions[regr_key][class_key]
+        max_APC_vals = [i[0] for i in dict_with_APC_data.values()]
+        max_APC = np.max(max_APC_vals)
+        which_col_max = list(dict_with_APC_data.keys())[np.argmax(max_APC_vals)]
+        return max_APC, which_col_max
+
 
     def get_frac_diffs(self, regressor_name, class_key, args, which_cols=None, verbose=False ):
         """Get desired fractional differences calculated in DataFrame object.
@@ -491,8 +694,38 @@ class Regressor():
             return 0
         all_cols = self.regr_dfs_per_class[regressor_key]
 
+        # I dont really know what I was doing here.....
+
 
     def mult_diffs(self, regressor_name, class_key, col_keys, alpha, cutoff, verbose = False):
+        """For multiple calls to cross_validate.
+
+        # TODO: check that these docs are correct
+
+        Parameters
+        ----------
+        regressor_name : str
+            Name of regression algorithm to use.
+        class_key : str, class_dtype(int or other)
+            Name of class data to use.
+        col_keys : str
+            Column keys to cross validate on.
+        alpha : float
+            Fraction of data set to cross validate on.
+        cutoff : float
+            Sets the cutoff percentage at which to calculate
+            the fraction of the data set above or below.
+        vebose : bool
+            Print useful diagnostic information.
+
+        Returns
+        -------
+        p_diffs_holder : ndarray
+            Percent differencs per column.
+        attr_holder : ndarray
+            Contains the number of points outside the cutoff, mean,
+            and standard deviation of the percent difference calculations.
+        """
         #col_keys = self.regr_dfs_per_class[class_key].keys()
         if verbose:
             print("MULT DIFFS:",regressor_name, col_keys)
@@ -528,6 +761,11 @@ class Regressor():
         ----------
         class_name : str
             Specify what class data will plotted.
+
+        Returns
+        -------
+        matplotlib figure
+            Plots with all regression data for a given class.
         """
 
         data_out = self.regr_dfs_per_class[class_name]
@@ -537,7 +775,7 @@ class Regressor():
             pass
         else:
             print("Output for class '{0}': {1} \nNo valid data to plot.".format(class_name, str(data_out)) )
-            return
+            return None
 
         key_in  = np.array(data_in.columns)
         key_out = np.array(data_out.columns)
@@ -557,7 +795,7 @@ class Regressor():
         if num_y_axis == 1:
             subs = np.array([subs])
 
-        print("Plotting all regression data from class '{0}'.".format(class_name))
+        print("Plotting all regression data from class '{0}'. This could take some time...".format(class_name))
 
         for i in range( num_x_axis ):
             for k in range( num_y_axis ):
@@ -568,8 +806,7 @@ class Regressor():
                 subs[k,i].set_xlabel( key_in[i] )
                 subs[k,i].set_ylabel( key_out[k] )
         fig.tight_layout()
-        plt.show()
-        return None
+        return fig
 
 
     def get_rnd_test_inputs(self, class_name, N, other_rng=dict(), verbose=False):
