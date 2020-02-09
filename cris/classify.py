@@ -73,7 +73,7 @@ class Classifier():
             self.train(cls_name, di=None, verbose=verbose)
         return None
 
-    def train(self, classifier_name, di = None, verbose = False ):
+    def train(self, classifier_name, di = None, verbose = False, **kwargs ):
         """Train a classifier.
 
         Implemented classifiers:
@@ -111,7 +111,7 @@ class Classifier():
         elif classifier_key in "RBF":
             bi_cls_holder = self.fit_rbf_interpolator( data_interval = di, verbose = verbose )
         elif classifier_key in "GaussianProcessClassifier":
-            bi_cls_holder = self.fit_gaussian_process_classifier( data_interval = di, verbose = verbose )
+            bi_cls_holder = self.fit_gaussian_process_classifier( data_interval = di, verbose = verbose, **kwargs )
         else:
             print("No classifiers with name {0}.".format(classifier_name))
             return
@@ -144,9 +144,8 @@ class Classifier():
 
         Returns
         -------
-        binary_classifier_holder : array_like
-            Each element is a trained linearNDinterpolator object.
-            N elements for N classes.
+        binary_classifier_holder : dict
+            Sorted by class, each key maps to a trained linearNDinterpolator object.
         """
         if verbose:
             if data_interval is None:
@@ -195,9 +194,8 @@ class Classifier():
 
         Returns
         -------
-        binary_classifier_holder : array_like
-            Each element is a trained RBF object.
-            N elements for N classes.
+        binary_classifier_holder : dict
+            Sorted by class, each key maps to a trained RBF object.
         """
         if verbose:
             if data_interval is None:
@@ -242,7 +240,7 @@ class Classifier():
 
 
     def fit_gaussian_process_classifier(self, data_interval=None, my_kernel=None, n_restarts=5, verbose=False):
-        """fit a Gaussian Process classifier
+        """Fit a Gaussian Process classifier
         implementation from: sklearn.gaussian_process
         (https://scikit-learn.org/stable/modules/gaussian_process.html)
 
@@ -261,8 +259,7 @@ class Classifier():
         Returns
         -------
         binary_classifier_holder : array_like
-            Each element is a trained GaussianProcessClassifier object.
-            N elements for N classes.
+            Sorted by class, each key maps to a trained GaussianProcessClassifier object
         """
         if verbose:
             if data_interval is None:
@@ -356,20 +353,23 @@ class Classifier():
         """Return probability that a given input corresponds to a class using
         trained classifiers.
 
-        # UDPATE DOCS
-
         Parameters
         ----------
         classifier_name : str
             Name of classifier to train.
         test_input : ndarray
             N dimensional inputs to be classified.
-        verbose : bool, optional
+            The shape should be N_points x N_dimensions.
+        verbose : optional, bool
+            Print useful information.
 
         Returns
         -------
         normalized_probs : ndarray
+            Array holding the normalized probability for a point to be in any of
+            the possible classes. Shape is N_points x N_classes.
         where_not_nan: ndarray
+            Indicies of the test inputs that did not result in nans.
         """
 
         probs = []
@@ -537,6 +537,8 @@ class Classifier():
 
         train_data_indicies, cv_test_input_data, cv_test_output_data = self.get_cross_val_data( alpha )
 
+        classifier_names = [self.get_classifier_name_to_key(x) for x in classifier_names]
+
         if verbose:
             print("alpha: {0}, num_training_points: {1}".format(alpha, len(train_data_indicies)) )
 
@@ -552,8 +554,7 @@ class Classifier():
         num_corr_holder = []
         # Test classification
         for name in classifier_names:
-            pred_ids, probs, where_not_nan = \
-                        self.return_class_predictions(name, cv_test_input_data)
+            pred_ids, probs, where_not_nan = self.get_class_predictions(name, cv_test_input_data)
 
             predicted_class_ids.append( pred_ids )
             where_not_nans_holder.append( where_not_nan )
@@ -561,16 +562,22 @@ class Classifier():
             num_correct = np.sum(pred_ids == cv_test_output_data[where_not_nan])
             num_corr_holder.append( num_correct )
 
-        percent_correct = np.array(num_corr_holder)/len(cv_test_input_data[where_not_nan]) * 100.
+        percent_correct = []
+        for j in range(len(num_corr_holder)):
+            top = num_corr_holder[j]
+            bot = len(cv_test_input_data[where_not_nans_holder[j]])
+            percent_correct.append( top/bot * 100. )
 
         if verbose:
-            print("\nInterp \t percent correct")
-            print("------   ----------------")
+            print("% Correct      Interpolator")
+            print("---------    ----------------")
             for i in range(len(classifier_names)):
-                print( "{0} \t {1:.3f}".format(classifier_names[i], percent_correct[i]) )
+                offset = 5 + len(classifier_names[i])
+                print( " {1:.3f} {0}".format(classifier_names[i].rjust(offset), percent_correct[i]) )
+            print("")
 
         self.__train_cross_val = False
-        return percent_correct, time_to_train
+        return np.array(percent_correct), np.array(time_to_train)
 
 
     def make_cv_plot_data(self, interp_type, alphas, N_iterations, folder_path = "cv_data/"):
@@ -644,14 +651,14 @@ class Classifier():
 
         Parameters
         ----------
-        N: int
+        N : int
             Number of test inputs to return.
-        other_rng: dict, optional
-            Change the range of random sampling in desired axis. By default,
-            the sampling is done in the range of the training data.
-            The axis is specified with an integer key and the value
-            is a list specifying the range. {1:[min, max]}
-        verbose: bool, optional
+        other_rng : dict, optional
+            Change the range of random sampling in desired axis.
+            By default, the sampling is done in the range of the training data.
+            The axis is specified with an integer key in [0,N-1] mapping to a list
+            specifying the range. ( e.g. {1:[my_min, my_max]} )
+        verbose : bool, optional
             Print diagnostic information. (default False)
 
         Returns
@@ -688,26 +695,28 @@ class Classifier():
         return rnd_test_points
 
 
-    def make_max_cls_plot(self,):
+    def make_max_cls_plot(self, classifier_name, axes_keys, other_rng=dict()):
         """THIS FUNCTION DOES NOT WORK
-        DO NOT USE YET!"""
+        DO NOT USE YET! Probably need the slicing."""
         return None
-        vals = self.get_rnd_test_inputs(4000)
-        class_vals, probs = self.return_class_predictions("rbf", vals, return_probs=True )
+        vals = self.get_rnd_test_inputs(4000, other_rng=other_rng)
+        class_vals, probs = self.return_class_predictions(classifier_name, vals, return_probs=True)
 
         fig, (cls_data, prob) = plt.subplots( 1, 2, figsize=(12,4), \
                                 gridspec_kw={'width_ratios': [1., 1.2]} )
 
+        input_data = self._TableData_.get_data(what_data='input')
+        x_data = np.array(input_data[axes_keys[0]])
+        y_data = np.array(input_data[axes_keys[1]])
         cls_data.set_title("Predictions from trained classifier")
-        cls_data.set_xlabel("input_1"); cls_data.set_ylabel("input_2")
-        cls_data.scatter( self._TableData_.get_input_data().T[0],
-                          self._TableData_.get_input_data().T[1],
-                          c = self._TableData_.get_output_data().T[0])
+        cls_data.set_xlabel(axes_keys[0]); cls_data.set_ylabel(axes_keys[1])
+        cls_data.scatter( x_data, y_data,
+                          c = self._TableData_.get_data(what_data='output').T[0] )
                           # You need to use a mapping to get classes to colors
                           # I should add this to data.py
-        prob.set_xlabel("input_1")
+        prob.set_xlabel(axes_keys[0])
         prob_plt = prob.scatter( vals.T[0], vals.T[1], \
-                                c = np.max( probs, axis = 1 ), cmap = 'bone', )
+                                c = np.max(probs,axis=1), cmap = 'bone')
         cb = fig.colorbar( prob_plt)
         cb.ax.set_ylabel( "Maximum classification probability" )
         plt.show()
