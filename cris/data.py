@@ -428,17 +428,18 @@ class TableData():
             input_data = input_data.values
         elif isinstance( input_data, list ):
             input_data = np.array(input_data)
-        elif isinstace( input_data, np.array() ):
+        elif isinstance( input_data, np.ndarray ):
             pass
         else:
             raise ValueError("input_data must be pandas DataFrame or numpy array")
+
         where_nearest_neighbors = OrderedDict()
         avg_distances = OrderedDict()
         for n_ in n_neighbors:
             avg_dist, indicies = calc_avg_dist( input_data, n_, neighbor=neighbor)
             where_nearest_neighbors[n_] = indicies
             avg_distances[n_] = avg_dist
-        if return_diffs:
+        if return_avg_dists:
             return where_nearest_neighbors, avg_distances
         else:
             return where_nearest_neighbors
