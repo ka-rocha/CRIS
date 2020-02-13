@@ -85,6 +85,11 @@ def populate_parameter_space( file_path, N_new_points=1, **kwargs ):
     return prop_points, pred_classes
 
 
+# I think this function above me should be named get proposed points
+# And then add another function called populate parameter space that iterates over proposed points
+# unitl some convergence on the fake data set or something
+
+
 
 def test_populate_parameter_space( file_path, N_new_points=1, **kwargs ):
     """Testing

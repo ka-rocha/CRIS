@@ -140,7 +140,8 @@ class Test_CRIS_Classifier(unittest.TestCase):
 
 
 class Test_CRIS_Regressor(unittest.TestCase):
-
+    # Have not included:
+    # get_frac_diffs()  - at this point it isn't working yet.
     def get_TableData(self):
         files = None
         input_cols = ['input_1', 'input_2' ]
@@ -194,16 +195,63 @@ class Test_CRIS_Regressor(unittest.TestCase):
         regr_obj = self.test_training()
         regr_obj.get_max_APC_val( "rbf", "D", np.array([[0,1]]) )
 
-    def test_get_rnd_test_inputs(self):
+    def test_get_rnd_test_inputs(self, N=10):
         regr_obj = self.test_init_Regressor()
-        test_in = regr_obj.get_rnd_test_inputs( "A", 10 )
-        self.assertTrue( test_in.shape == (10,2) )
-        other_test_in = regr_obj.get_rnd_test_inputs( "A", 10, other_rng={0:[-2,-1]} )
+        test_in = regr_obj.get_rnd_test_inputs( "A", N )
+        self.assertTrue( test_in.shape == (N,2) )
+        other_test_in = regr_obj.get_rnd_test_inputs( "A", N, other_rng={0:[-2,-1]} )
         self.assertTrue( (other_test_in[:,0] < 0).all() )
+        return test_in
 
     def test_plot_regr_data(self):
         regr_obj = self.test_init_Regressor()
         regr_obj.plot_regr_data("A")
+
+class Test_CRIS_Sampler(unittest.TestCase):
+
+    def get_TableData(self):
+        files = None
+        input_cols = ['input_1', 'input_2' ]
+        output_cols = ['class', 'output_1']
+        class_col_name = 'class'
+        loaded_data = pd.read_csv(os.path.join(TEST_DATA_DIR, "synth_data.dat"))
+        table_object = TableData( files, input_cols, output_cols, class_col_name,
+                                  my_DataFrame = loaded_data, verbose=False, n_neighbors=[2,3])
+        return table_object
+
+    def get_trained_Classifier(self):
+        table_object = self.get_TableData()
+        classifier_obj = Classifier( table_object )
+        classifier_obj.train_everything(["rbf", "linear"])
+        return classifier_obj
+
+    def get_trained_Regressor(self):
+        table_object = self.get_TableData()
+        regr_obj = Regressor( table_object )
+        regr_obj.train_everything(["rbf"])
+        return regr_obj
+
+    def test_init_Sampler(self):
+        classifier_obj = self.get_trained_Classifier()
+        regr_obj = self.get_trained_Regressor()
+        sampler_obj = Sampler( classifier=classifier_obj, regressor=None )
+        sampler_obj = Sampler( classifier=classifier_obj, regressor=regr_obj )
+        return sampler_obj
+
+    def test_run_MCMC(self):
+        sampler_obj = self.test_init_Sampler()
+        step_history, acc, rej = sampler_obj.run_MCMC(100, 0.5, [[0,0]],
+                                            sampler_obj.analytic_target_dist, "rbf")
+        return None
+
+    def test_run_PTMCMC(self):
+        sampler_obj = self.test_init_Sampler()
+        chain_step_history, T_list = sampler_obj.run_PTMCMC(30, 100, np.array([0,0]),
+                                                sampler_obj.analytic_target_dist,
+                                                "rbf", verbose=True  )
+        return None
+
+    
 
 
 

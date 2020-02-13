@@ -24,7 +24,7 @@ class Sampler():
         if self._Classifier_ is None:
             pass
         else:
-            # Find the bounds of the walker - should be TableData attribute
+            # Find the bounds of the walker - should be a TableData attribute
             self.max_vals = []
             self.min_vals = []
             input_data_cols = self._Classifier_._TableData_.get_data(what_data='input').T
@@ -35,11 +35,12 @@ class Sampler():
 
         # You can save chains_history in here
         self._chain_step_hist_holder_ = OrderedDict()
-
+        # Not fully implemented yet I'm pretty sure
         self._MAX_APC_str_ = []
 
+    # def TD_2d_analytic(self, name, args)
     def analytic_target_dist( self, name, args ):
-        """For testing."""
+        """Two dimensional analytic target distribution for testing."""
         mu, nu = args
         arg1 = - mu**2 - ( 9 + 4*mu**2 +8*nu )**2
         arg2 = - 8*mu**2 - 8*( nu - 2 )**2
@@ -83,17 +84,7 @@ class Sampler():
                 # nan value, do nothing
                 return (1-max_probs) + 0
 
-            this_class_regr_cols = self._Regressor_.regr_dfs_per_class[cls_key].keys()
-            good_col_keys = [i for i in this_class_regr_cols if "APC" in i] # columns with average percent change data
-
-            predictions = self._Regressor_.get_predictions( [names[1]], [cls_key], good_col_keys, correct_shape_args  )
-            regr_key = self._Regressor_.get_regressor_name_to_key(names[1])
-
-            dict_with_APC_data = predictions[regr_key][cls_key]
-            max_APC_vals = [i[0] for i in dict_with_APC_data.values()]
-            max_APC = np.max(max_APC_vals)
-            which_col_max = list(dict_with_APC_data.keys())[np.argmax(max_APC_vals)]
-
+            max_APC, which_col_max = self._Regressor_.get_max_APC_val( names[1], cls_key, correct_shape_args )
             self._MAX_APC_str_.append(which_col_max)
 
             return (1-max_probs) + max_APC
@@ -506,9 +497,9 @@ class Sampler():
 
 
     def get_proposed_points( self, step_history, N_points, Kappa, \
-                             shuffle = False, norm_steps = False, \
-                             add_mvns_together = False, \
-                             var_mult = None, seed=None, n_iters=10, verbose = False ):
+                             shuffle=False, norm_steps=False, \
+                             add_mvns_together=False, \
+                             var_mult=None, seed=None, n_iters=2, verbose=False ):
         """The desnity logic is not deterministic so, multiple iterations
         may be needed to converge on a desired number of proposed points.
         This method performs multiple calls to do_density_logic while
@@ -603,7 +594,7 @@ class Sampler():
             print( "Kappas: \n{0}".format(np.array(good_kappas)) )
             print( "loc: {0}".format(where_best_distribution) )
 
-            #self.make_prop_points_plots(step_history, best_acc_pts) # doesn't work yet
+            #self.make_prop_points_plots(step_history, best_acc_pts)
 
         return best_acc_pts, best_Kappa
 
@@ -635,9 +626,7 @@ class Sampler():
         steps = chain_holder[which_temp].T
         axis_names = self._Classifier_._TableData_.get_data(what_data='input',return_df=True).keys()
 
-
-        fig, axs = plt.subplots(nrows=n_axis, ncols=2, \
-                                       figsize=(10, 2.5*n_axis), dpi=100, \
+        fig, axs = plt.subplots(nrows=n_axis, ncols=2, figsize=(10, 2.5*n_axis), dpi=100, \
                                        gridspec_kw={'width_ratios':[1.8, 1]})
 
         for num, ax in enumerate(axs):
@@ -656,3 +645,4 @@ class Sampler():
             plt.savefig( "trace_plot_T{0:.0f}.pdf".format(T_list[which_temp]) )
         if show_fig:
             plt.show()
+        return None
