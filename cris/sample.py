@@ -25,69 +25,77 @@ class Sampler():
             pass
         else:
             # Find the bounds of the walker - should be a TableData attribute
-            self.max_vals = []
-            self.min_vals = []
+            self._max_vals_ = []
+            self._min_vals_ = []
             input_data_cols = self._Classifier_._TableData_.get_data(what_data='input').T
             for data in input_data_cols:
-                self.max_vals.append(max(data))
-                self.min_vals.append(min(data))
+                self._max_vals_.append(max(data))
+                self._min_vals_.append(min(data))
             # self._max_vals_, self._min_vals_ = self._Classifier_.get_data_bounds()
 
         # You can save chains_history in here
         self._chain_step_hist_holder_ = OrderedDict()
-        # Not fully implemented yet I'm pretty sure
+        # Not fully implemented yet I'm pretty sure....
         self._MAX_APC_str_ = []
 
-    # def TD_2d_analytic(self, name, args)
-    def analytic_target_dist( self, name, args ):
-        """Two dimensional analytic target distribution for testing."""
+    def TD_2d_analytic(self, name, args, **kwargs):
+        """Two dimensional analytic target distribution for testing.
+        $\frac{16}{3\pi} \left( \exp\left[-\mu^2 - (9 + 4\mu^2 + 8\nu)^2\right]
+        + \frac{1}{2} \exp\left[- 8 \mu^2 - 8 (\nu-2)^2\right] \right)$
+        """
         mu, nu = args
         arg1 = - mu**2 - ( 9 + 4*mu**2 +8*nu )**2
         arg2 = - 8*mu**2 - 8*( nu - 2 )**2
         return (16)/(3*np.pi) * ( np.exp(arg1) + 0.5*np.exp(arg2) )
 
-    def classifier_target_dist( self, classifier_name, args, other_args=None ):
-        """Target distribution using classification only."""
-        if other_args is None:
-            correct_shape_args = np.array( [args] )
-        else:
-            correct_shape_args = other_args
+    def TD_classification(self, classifier_name, args, **kwargs):
+        """Target distribution using classification.
+        Namely: f(x) = 1 - max[P(class)]
 
-        normalized_probs, where_not_nan = self._Classifier_.return_probs( classifier_name, correct_shape_args, \
+        If classification probability is Nan: f(x) = 0
+        """
+        normalized_probs, where_not_nan = self._Classifier_.return_probs( classifier_name, args, \
                                                               verbose=False )
-
         max_probs = np.max(normalized_probs, axis=1)
         if (len(where_not_nan) != len(max_probs)):
             return 0
         else:
-            return (1-max_probs)
+            approx_max_TD_cls_term = 1 - 1/self._Classifier_._TableData_.num_classes
+            return (1-max_probs) * 1/approx_max_TD_cls_term
 
-    def cls_rgr_target_dist(self, names, args, other_args = None):
-        """Use classification & regression."""
-        if other_args is None:
-            correct_shape_args = np.array( [args] )
-        else:
-            correct_shape_args = other_args
+    def TD_classification_regression(self, names, args, **kwargs):
+        """Target distribution using both classification & regression.
 
-        normalized_probs, where_not_nan = self._Classifier_.return_probs( names[0], correct_shape_args, \
+        kwargs
+        TAU : float, optional
+            Relative weight of classification to regression term.
+            By default it's set to 0.6.
+        """
+        normalized_probs, where_not_nan = self._Classifier_.return_probs( names[0], args, \
                                                               verbose=False )
         max_probs = np.max(normalized_probs, axis=1)
-        pred_class_id = np.argmax(normalized_probs[0])
-        cls_key = self._Classifier_.class_id_mapping[ pred_class_id ]
+        pred_class_ids = np.argmax(normalized_probs, axis=1 )
+        cls_key = [self._Classifier_.class_id_mapping[i] for i in pred_class_ids]
+
+        approx_max_TD_cls_term = 1 - 1/self._Classifier_._TableData_.num_classes
+        classification_term = (1 - max_probs) * 1/approx_max_TD_cls_term
 
         if (len(where_not_nan) != len(max_probs)):
             return 0
         else:
-            if isinstance(self._Regressor_.regr_dfs_per_class[cls_key], pd.DataFrame):
-                pass
+            if isinstance(self._Regressor_.regr_dfs_per_class[cls_key[0]], pd.DataFrame):
+                max_APC, which_col_max = self._Regressor_.get_max_APC_val( names[1], cls_key[0], args )
+                self._MAX_APC_str_.append(which_col_max)
+
+                A1 = kwargs.pop("A1", 0.5)
+                scaling_log_func = lambda A1, x : np.log10( A1 * np.abs(x) + 1 )
+                A0 = 1
+                regression_term = A0 * scaling_log_func( A1, max_APC )
             else:
-                # nan value, do nothing
-                return (1-max_probs) + 0
+                regression_term = 0
 
-            max_APC, which_col_max = self._Regressor_.get_max_APC_val( names[1], cls_key, correct_shape_args )
-            self._MAX_APC_str_.append(which_col_max)
-
-            return (1-max_probs) + max_APC
+        TAU = kwargs.pop("TAU", 0.5)
+        return TAU * classification_term + (1 - TAU) * regression_term
 
 
     def save_chain_step_history(self, key, chain_step_history, overwrite=False):
@@ -110,7 +118,7 @@ class Sampler():
 
     def run_PTMCMC( self, T_max, N_tot, init_pos, target_dist, classifier_name, \
                     N_draws_per_swap=3, c_spacing=1.2, alpha=1.0, \
-                    upper_limit_reject=1e5, verbose=False, trace_plots=False ):
+                    upper_limit_reject=1e5, verbose=False, trace_plots=False, **TD_kwargs ):
         """Runs a Paralel Tempered MCMC with a user specified target distribution.
         Calls the method run_MCMC.
 
@@ -163,8 +171,7 @@ class Sampler():
 
         num_chains = len(T_list)
         if verbose:
-            print("Num chains: {0}".format(num_chains) )
-            print("Temperatures: {0}\n".format(T_list) )
+            print("Num chains: {0}\nTemperatures: {1}\n".format(num_chains, T_list) )
 
         # data storage
         chain_holder = OrderedDict()
@@ -176,6 +183,10 @@ class Sampler():
         # Initial conditions for all links in chain
         # ADD: init_pos can be a unitless position in the range of the axes of the data
         #       This change should also be applied to alpha - user just gives num(0,1]
+        if not isinstance( init_pos, np.ndarray ):
+            init_pos = np.array( init_pos )
+        if init_pos.ndim > 1:
+            raise ValueError("init_pos has {0} dimensions, must be one dimensional.".format(init_pos.ndim))
         this_iter_step_loc = [init_pos]*num_chains
 
         # Accept ratio tracker
@@ -192,13 +203,11 @@ class Sampler():
             for i in range( num_chains ):
                 # Run MCMC as f(T) N_draw times
                 step_history= [this_iter_step_loc[i]]
-                steps, acc, rej = self.run_MCMC( N_draws,
-                                                 alpha, \
-                                                 step_history, \
-                                                 target_dist,\
-                                                 classifier_name,\
+                steps, acc, rej = self.run_MCMC( N_draws, alpha, step_history, \
+                                                 target_dist, classifier_name,\
                                                  T = T_list[i], \
-                                                 upper_limit_reject = upper_limit_reject)
+                                                 upper_limit_reject = upper_limit_reject, \
+                                                 **TD_kwargs)
                 last_step_holder.append( steps[-1] ) # save 'current' params for each T
                 total_acc[i] += acc
                 total_rej[i] += rej
@@ -223,10 +232,10 @@ class Sampler():
                 args_i = last_step_holder[i]
                 args_i_1 = last_step_holder[i+1]
 
-                top = (target_dist( classifier_name, args_i_1 ))**(1/T_list[i]) * \
-                      (target_dist( classifier_name, args_i ))**(1/T_list[i+1])
-                bot = (target_dist( classifier_name, args_i ))**(1/T_list[i]) * \
-                      (target_dist( classifier_name, args_i_1 ))**(1/T_list[i+1])
+                top = (target_dist( classifier_name, args_i_1, **TD_kwargs ))**(1/T_list[i]) * \
+                      (target_dist( classifier_name, args_i, **TD_kwargs ))**(1/T_list[i+1])
+                bot = (target_dist( classifier_name, args_i, **TD_kwargs ))**(1/T_list[i]) * \
+                      (target_dist( classifier_name, args_i_1, **TD_kwargs ))**(1/T_list[i+1])
 
                 # can get div 0 errors when using linear because of nans
                 if (bot == 0):
@@ -267,7 +276,7 @@ class Sampler():
 
 
     def run_MCMC( self, N_trials, alpha, step_history, target_dist, \
-                    classifier_name, T = 1, upper_limit_reject = 1e5):
+                    classifier_name, T = 1, upper_limit_reject = 1e5, **TD_kwargs):
         """Runs a Markov chain Monte Carlo for N trials.
 
         Parameters
@@ -308,6 +317,12 @@ class Sampler():
         reject : int
             Total number of rejected steps.
         """
+        if not isinstance( step_history, np.ndarray ):
+            step_history = np.array(step_history)
+        if step_history.ndim == 1:
+            step_history = np.array([step_history])
+        # We will be appending to the list
+        step_history = list(step_history)
 
         accept = 0; reject = 0;
 
@@ -315,15 +330,15 @@ class Sampler():
             current_step = step_history[-1]
 
             # f(θ)
-            val = target_dist( classifier_name, current_step )
+            val = target_dist( classifier_name, current_step, **TD_kwargs )
             # θ+Δθ
             trial_step = current_step + np.random.normal( 0, alpha, size=len(current_step) )
             # f(θ+Δθ)
-            trial_val = target_dist( classifier_name, trial_step )
+            trial_val = target_dist( classifier_name, trial_step, **TD_kwargs )
 
             # check if the trial step is in the range of data
             for i, step_in_axis in enumerate(trial_step):
-                if (step_in_axis <= self.max_vals[i] and step_in_axis >= self.min_vals[i]):
+                if (step_in_axis <= self._max_vals_[i] and step_in_axis >= self._min_vals_[i]):
                     pass
                 else:
                     trial_val = 0 # essential reject points outside of range
@@ -350,24 +365,80 @@ class Sampler():
         The max and min are taken from the original data set from TalbeData."""
         normed_steps = np.copy(step_history)
         for j, steps_in_axis in enumerate(step_history.T):
-            normed_steps.T[j] = (steps_in_axis - self.min_vals[j])/(self.max_vals[j]-self.min_vals[j])
+            normed_steps.T[j] = (steps_in_axis - self._min_vals_[j])/(self._max_vals_[j]-self._min_vals_[j])
         return normed_steps
 
 
     def undo_normalize_step_history(self, normed_steps):
         """Takes normed steps from [0,1] and returns their value
-        in the original range of the axes. Based off the range of training data"""
+        in the original range of the axes based off the range of training data."""
         mapped_steps = np.copy(normed_steps)
         for j, steps_in_axis in enumerate(normed_steps.T):
-            mapped_steps.T[j] = steps_in_axis * (self.max_vals[j]-self.min_vals[j]) + self.min_vals[j]
+            mapped_steps.T[j] = steps_in_axis * (self._max_vals_[j]-self._min_vals_[j]) + self._min_vals_[j]
         return mapped_steps
+
+    def do_simple_density_logic(self, step_history, N_points, Kappa, var_mult = None,
+                                add_mvns_together = False, verbose = False):
+        """Perform multivariate normal density logic on a given step history.
+        This is a simplified version of the method 'do_density_logic'. It assumes
+        that every accepted point will have the same exact MVN.
+
+        Parameters
+        ----------
+        step_history : ndarray
+        N_points : int
+        Kappa : float
+        var_mult : float, ndarray, optional
+        add_mvns_together : bool, optional
+        verbose : bool, optional
+
+        Returns
+        -------
+        accepted_points : ndarray
+        rejected_points : ndarray
+        """
+        n_dim = len( self._Classifier_.input_data[0] )
+        # approximate scaling of the variance given a set of N points to propose
+        # the filling factor Kappa is not generally known a priori
+        if var_mult is None:
+            var_mult = 1
+        sigma = Kappa * 0.5 * (N_points)**(-1./n_dim) * var_mult
+        Covariance = sigma * np.identity( n_dim )
+        if verbose: print("Covariance: \n{0}".format(Covariance))
+
+        single_MVN = scipy.stats.multivariate_normal( np.zeros(n_dim), Covariance )
+        max_val = 1/np.sqrt( (2*np.pi)**(n_dim) * np.linalg.det(Covariance) )
+
+        accepted_points = []; rejected_points = []
+        for step in step_history:
+            if len(accepted_points) < 1:
+                accepted_points.append( step )
+                continue
+
+            # distance: far is this point from all the accepted_points
+            dist_to_acc_pts =  step - np.array(accepted_points)
+            pdf_val_at_point =  single_MVN.pdf( dist_to_acc_pts )
+            if isinstance(pdf_val_at_point, float):
+                pdf_val_at_point = [pdf_val_at_point]
+
+            if add_mvns_together:
+                pdf_val_at_point = np.sum( pdf_val_at_point )
+            random_chances = np.random.uniform(low=0, high=max_val, size=len(pdf_val_at_point) )
+            chance_above_distr = random_chances > pdf_val_at_point
+
+            if chance_above_distr.all():
+                accepted_points.append( step )
+            else:
+                rejected_points.append( step )
+
+        return np.array(accepted_points), np.array(rejected_points)
 
 
     def do_density_logic( self, step_history, N_points, Kappa,\
-                            shuffle = True, norm_steps = False, var_mult = None, \
-                            add_mvns_together = False, verbose = False ):
+                            shuffle = False, norm_steps = False, var_mult = None, \
+                            add_mvns_together = False, pre_acc_points = None, verbose = False ):
         """Do the density based off of the normal gaussian kernel on each point. This method
-        automatically takes out the first 5% of steps of the mcmc so that the first starting
+        automatically takes out the first 5% of steps of the mcmc so that the initial starting
         points are not chosen automatically (if you start in a non-ideal region). Wait for
         the burn in.
 
@@ -407,23 +478,22 @@ class Sampler():
             var_mult = np.array([1]*num_dim)
         else:
             var_mult = np.array( var_mult )
-            assert len(var_mult) == num_dim, "Multiplier must be the same dimensionality as input data."
+            if var_mult.ndim != num_dim:
+                raise ValueError( "var_mult must be the same dimensionality as input data." )
 
         if verbose:
             print( "Num dims: {0}".format(num_dim) )
             print( "length scale sigma: {0}".format(sigma) )
-            print( "var_mult: {0}".format(var_mult) ) # variance multiplier
-            print( "Kappa: {0}".format(Kappa) ) # multiplier of average variance
+            print( "var_mult: {0}".format(var_mult) )
+            print( "Kappa: {0}".format(Kappa) )
 
         ### -> Forcing a few key points to always be accepted, for example
-        # if acc_pts is None:
-        #     accepted_points = []
-        # elif isinstance(acc_pts, str):
-        #     accepted_points = np.loadtxt( acc_pts )
-        # elif isinstance(acc_pts, np.array):
-        #     accepted_points = list(acc_pts)
-        # else:
-        #     accepted_points = []
+        if pre_acc_points is None:
+            accepted_points = []
+        elif isinstance(acc_pts, np.ndarray):
+            accepted_points = list(acc_pts)
+        else:
+            accepted_points = []
 
         accepted_points = []
         accepted_sigmas = []
@@ -445,7 +515,7 @@ class Sampler():
                 k = len(Sigma)
                 max_val = 1/np.sqrt( (2*np.pi)**(k) * np.linalg.det(Sigma) )
                 max_val_holder.append( max_val )
-                rnd_chance = np.random.uniform( 0, max(max_val_holder), size = 1 )
+                rnd_chance = np.random.uniform(low=0, high=np.max(max_val_holder), size=1)
                 # we will choose the chance from [0, highest point in distr]
 
                 distr_holder = []
@@ -499,8 +569,12 @@ class Sampler():
     def get_proposed_points( self, step_history, N_points, Kappa, \
                              shuffle=False, norm_steps=False, \
                              add_mvns_together=False, \
-                             var_mult=None, seed=None, n_iters=2, verbose=False ):
-        """The desnity logic is not deterministic so, multiple iterations
+                             var_mult=None, seed=None, n_repeats=1,
+                             max_iters = 1e4, verbose=False ):
+        """Given a step history of an MCMC, get N proposed points spread out
+        in parameter space.
+
+        The desnity logic is not deterministic, so multiple iterations
         may be needed to converge on a desired number of proposed points.
         This method performs multiple calls to do_density_logic while
         changing Kappa in order to return the desired number of points. After
@@ -535,33 +609,29 @@ class Sampler():
         without converging on the desired number of points.
         """
 
-        if seed is None:
-            pass
-        else:
+        if seed is not None:
             numpy.random.seed(seed = seed)
             print("Setting seed: {0}".format(seed))
 
-        if verbose: print("Converging to {0} points, {1} times.".format(N_points, int(n_iters)))
+        if verbose:
+            print("Converging to {0} points, {1} times.".format(N_points, int(n_repeats)))
 
-        enough_good_pts = False; how_many_good_pts = int(n_iters)
+        enough_good_pts = False; how_many_good_pts = int(n_repeats)
         good_n_points = []; avg_distances = []; good_kappas = []
-        iters = 0
-        max_iters = 5e2
+        iters = 1
         start_time = time.time()
         while ( not(enough_good_pts) and iters < max_iters):
 
-            acc_pts, rej_pts, acc_sigmas = self.do_density_logic( step_history, N_points, Kappa, \
-                                                        norm_steps = norm_steps, \
+            acc_pts, rej_pts = self.do_simple_density_logic( step_history, N_points, Kappa, \
                                                         var_mult = var_mult, \
-                                                        shuffle = shuffle, \
                                                         add_mvns_together = add_mvns_together, \
                                                         verbose = False )
 
             average_dist_between_acc_points = np.mean( pdist( acc_pts ) )
             if len(acc_pts) == N_points:
                 good_n_points.append( acc_pts )
-                good_kappas.append( Kappa )
                 avg_distances.append( average_dist_between_acc_points )
+                good_kappas.append( Kappa )
                 if len( good_n_points ) >= how_many_good_pts:
                     enough_good_pts = True
 
@@ -574,16 +644,21 @@ class Sampler():
                 print( "\t acc_pts: {0}, Kappa = {1:.3f}".format(len(acc_pts), Kappa) + print_str, end=ending )
 
             diff = abs( len(acc_pts) - N_points )
+
+            change_factor = 0.01/( max(1, np.log10(iters)) )
             if len(acc_pts) > N_points:
-                Kappa = Kappa * (1 + 0.01*diff) # increase prop to difference
+                Kappa = Kappa * (1 + change_factor*diff) # increase kappa
             elif len(acc_pts) < N_points:
-                Kappa = Kappa * (1 - 0.01*diff) # decrease prop to difference
-            else:
-                pass
+                if (1 - change_factor*diff) < 0:
+                    Kappa = Kappa * 0.1
+                else:
+                    Kappa = Kappa * (1 - change_factor*diff) # decrease kappa
+
             iters += 1
 
         if (iters == max_iters): print("Reached max iters before converging!")
-        if verbose: print("\nFinal Kappa = {0}\n".format(Kappa))
+        if verbose:
+            print("\nFinal Kappa = {0}\nConverged in {1} iters.".format(Kappa, iters))
 
         # we want 1/r dependance to penalize closely spaced points
         where_best_distribution = np.argmax( avg_distances )
@@ -595,7 +670,6 @@ class Sampler():
             print( "loc: {0}".format(where_best_distribution) )
 
             #self.make_prop_points_plots(step_history, best_acc_pts)
-
         return best_acc_pts, best_Kappa
 
 
@@ -606,8 +680,8 @@ class Sampler():
         plt.figure(figsize=(4,4), dpi=90)
         plt.scatter( step_hist.T[axis1], step_hist.T[axis2], alpha=0.5, label="step history" )
         plt.scatter( prop_points.T[axis1], prop_points.T[axis2], color='pink', label="accepted points" )
-        plt.xlim( self.min_vals[axis1], self.max_vals[axis1] )
-        plt.ylim( self.min_vals[axis2], self.max_vals[axis2] )
+        plt.xlim( self._min_vals_[axis1], self._max_vals_[axis1] )
+        plt.ylim( self._min_vals_[axis2], self._max_vals_[axis2] )
         plt.legend(loc='best')
         plt.show()
         return None
