@@ -371,9 +371,12 @@ class Classifier():
         where_not_nan: ndarray
             Indicies of the test inputs that did not result in nans.
         """
+        if isinstance( test_input, list ):
+            test_input = np.array(test_input)
+        if test_input.ndim == 1:
+            test_input = np.array( [test_input] )
 
         probs = []
-
         if not bool(self._interpolators_) and not bool( self._cv_interpolators_ ): # if empty
             raise Exception("\n\nNo trained interpolators exist.")
 
@@ -441,7 +444,7 @@ class Classifier():
         -------
         pred_class_ids : array
             Predicted class IDs given test input.
-        probs : array
+        max_probs : array
             Probability the classifier gives for the chosen class.
         where_not_nan : array
             Inidices where there are no nans (from LinearNDInterpolator).
@@ -450,14 +453,14 @@ class Classifier():
         """
         all_probs, where_not_nan = self.return_probs(classifier_name, test_input)
 
-        probs = np.max( all_probs, axis=1 )
+        max_probs = np.max( all_probs, axis=1 )
         pred_class_ids = np.argmax( all_probs, axis = 1 )
 
         if return_ids:
-            return pred_class_ids, probs, where_not_nan
+            return pred_class_ids, max_probs, where_not_nan
         else:
             pred_classes = [self.class_id_mapping[i] for i in pred_class_ids]
-            return pred_classes, probs, where_not_nan
+            return pred_classes, max_probs, where_not_nan
 
 
     def get_cross_val_data(self, alpha):
