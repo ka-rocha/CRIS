@@ -435,6 +435,11 @@ class Regressor():
 
 
     def _predict(self, regressor_name, class_key, col_key, test_input, return_std = False):
+        
+        if isinstance( test_input, list ):
+            test_input = np.array(test_input)
+        if test_input.ndim == 1:
+            test_input = np.array( [test_input] )
 
         sigma = None # default
 
