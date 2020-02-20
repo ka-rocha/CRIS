@@ -240,18 +240,33 @@ class Test_CRIS_Sampler(unittest.TestCase):
 
     def test_run_MCMC(self):
         sampler_obj = self.test_init_Sampler()
-        step_history, acc, rej = sampler_obj.run_MCMC(100, 0.5, [[0,0]],
-                                            sampler_obj.analytic_target_dist, "rbf")
-        return None
+        step_history, acc, rej = sampler_obj.run_MCMC(100, 0.5, [0,0],
+                                            sampler_obj.TD_classification, "rbf")
+        return step_history
 
     def test_run_PTMCMC(self):
         sampler_obj = self.test_init_Sampler()
-        chain_step_history, T_list = sampler_obj.run_PTMCMC(30, 100, np.array([0,0]),
-                                                sampler_obj.analytic_target_dist,
-                                                "rbf", verbose=True  )
+        chain_step_history, T_list = sampler_obj.run_PTMCMC(30, 200, [0,0],
+                                                sampler_obj.TD_classification_regression,
+                                                ["rbf", "rbf"], verbose=True, c_spacing=1.5  )
         return None
 
-    
+    def test_normalize_step_history(self):
+        sampler_obj = self.test_init_Sampler()
+        random_step_hist = self.test_run_MCMC()
+        normed_steps = sampler_obj.normalize_step_history( random_step_hist )
+        for ax in range(len(normed_steps[0])):
+            self.assertTrue( (normed_steps.T[ax] >= 0).all() and (normed_steps.T[ax] <= 1).all() )
+        return normed_steps
+
+    def test_undo_normalize_step_history(self):
+        sampler_obj = self.test_init_Sampler()
+        normed_steps = self.test_normalize_step_history()
+        regular_steps = sampler_obj.undo_normalize_step_history( normed_steps )
+        for ax in range(len(normed_steps[0])):
+            self.assertTrue( (normed_steps.T[ax] >= -3).all() and (normed_steps.T[ax] <= 3).all() )
+        return None
+
 
 
 
@@ -301,10 +316,10 @@ class Test_CRIS(unittest.TestCase):
         classifier_obj, regressor_obj = self.get_classifier_and_regressor_objects()
         sampler_obj = Sampler( classifier = classifier_obj, regressor= regressor_obj )
 
-        steps, acc, rej = sampler_obj.run_MCMC(20, 0.5, [[0,0]], sampler_obj.classifier_target_dist, 'rbf'  )
+        steps, acc, rej = sampler_obj.run_MCMC(20, 0.5, [[0,0]], sampler_obj.TD_classification, 'rbf'  )
 
         chain_steps, T_list = sampler_obj.run_PTMCMC( 15, 200, [0,0],
-                                sampler_obj.classifier_target_dist,  "rbf",  alpha=0.3, verbose=True)
+                                sampler_obj.TD_classification,  "rbf",  alpha=0.3, verbose=True)
         self.assertTrue( len(chain_steps) == len(T_list) )
 
         points, kapp = sampler_obj.get_proposed_points( chain_steps[len(T_list)-1], 20, 25.5,
