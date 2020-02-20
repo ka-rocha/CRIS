@@ -371,7 +371,7 @@ class TableData():
                             info_str_15 = "\t -- {0} zeros in '{1}'".format(len(where_zero),_key)
                             self.__vb_helper(verbose, info_str_15)
                             if len(where_zero) == len(data):
-                                self.__vb_helper(verbose, f"Skipping percent change for {_key}... All data is zero.")
+                                self.__vb_helper(verbose, "Skipping percent change for {0}... All data is zero.".format(_key) )
                                 continue
                         # Take percent difference
                         avg_p_change = calc_avg_p_change(data, where_nearest_neighbors,
