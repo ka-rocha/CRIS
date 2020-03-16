@@ -89,7 +89,6 @@ def populate_parameter_space( file_path, N_new_points=1, **kwargs ):
 # And then add another function called populate parameter space that iterates over proposed points
 # unitl some convergence on the fake data set or something
 
-
 def new_populate_parameter_space( N_new_points=1, TableData_kwargs = {},
                                   Classifier_kwargs={}, Regressor_kwargs={},
                                   Sampler_kwargs={}, Propose_kwargs={} ):

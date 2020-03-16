@@ -57,11 +57,12 @@ class Sampler():
         normalized_probs, where_not_nan = self._Classifier_.return_probs( classifier_name, args, \
                                                               verbose=False )
         max_probs = np.max(normalized_probs, axis=1)
+
         if (len(where_not_nan) != len(max_probs)):
             return 0
         else:
-            approx_max_TD_cls_term = 1 - 1/self._Classifier_._TableData_.num_classes
-            return (1-max_probs) * 1/approx_max_TD_cls_term
+            theoretical_max_TD_cls_term = 1 - 1/self._Classifier_._TableData_.num_classes
+            return (1-max_probs) * 1/theoretical_max_TD_cls_term
 
     def TD_classification_regression(self, names, args, **kwargs):
         """Target distribution using both classification & regression.
@@ -77,8 +78,8 @@ class Sampler():
         pred_class_ids = np.argmax(normalized_probs, axis=1 )
         cls_key = [self._Classifier_.class_id_mapping[i] for i in pred_class_ids]
 
-        approx_max_TD_cls_term = 1 - 1/self._Classifier_._TableData_.num_classes
-        classification_term = (1 - max_probs) * 1/approx_max_TD_cls_term
+        theoretical_max_TD_cls_term = 1 - 1/self._Classifier_._TableData_.num_classes
+        classification_term = (1 - max_probs) * 1/theoretical_max_TD_cls_term
 
         if (len(where_not_nan) != len(max_probs)):
             return 0
@@ -89,7 +90,7 @@ class Sampler():
 
                 A1 = kwargs.pop("A1", 0.5)
                 scaling_log_func = lambda A1, x : np.log10( A1 * np.abs(x) + 1 )
-                A0 = 1
+                A0 = 1/scaling_log_func( A1, self._Regressor_.abs_max_APC )
                 regression_term = A0 * scaling_log_func( A1, max_APC )
             else:
                 regression_term = 0
@@ -645,7 +646,7 @@ class Sampler():
 
             diff = abs( len(acc_pts) - N_points )
 
-            change_factor = 0.01/( max(1, np.log10(iters)) )
+            change_factor = 0.01/(  max(1, np.log10(iters))  )
             if len(acc_pts) > N_points:
                 Kappa = Kappa * (1 + change_factor*diff) # increase kappa
             elif len(acc_pts) < N_points:

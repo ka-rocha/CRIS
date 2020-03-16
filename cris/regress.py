@@ -51,6 +51,15 @@ class Regressor():
         self.output_dict = holder[1] #_regr_outputs_
         self.regr_dfs_per_class = holder[2] #_regr_dfs_per_class_
 
+        max_apc_vals = []
+        apc_dfs_per_class = self.regr_dfs_per_class.copy()
+        for key, val in apc_dfs_per_class.items():
+            cols = [i for i in val if "APC" not in i]
+            apc_dfs_per_class[key] = val.drop( columns = cols )
+            abs_max_val = np.nanmax( abs(apc_dfs_per_class[key].to_numpy()) )
+            max_apc_vals.append( abs_max_val )
+        self.abs_max_APC = np.max( max_apc_vals )
+
         self._undefined_p_change_val_ = self._TableData_._return_data_("undefined_p_change_val")
 
         self._regressors_ = makehash()
@@ -435,7 +444,7 @@ class Regressor():
 
 
     def _predict(self, regressor_name, class_key, col_key, test_input, return_std = False):
-        
+
         if isinstance( test_input, list ):
             test_input = np.array(test_input)
         if test_input.ndim == 1:
