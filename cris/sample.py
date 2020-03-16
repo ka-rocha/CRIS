@@ -54,15 +54,21 @@ class Sampler():
 
         If classification probability is Nan: f(x) = 0
         """
+        TD_verbose = kwargs.get("TD_verbose", False)
+        TD_BETA = kwargs.get("TD_BETA", 1.0)
+
         normalized_probs, where_not_nan = self._Classifier_.return_probs( classifier_name, args, \
-                                                              verbose=False )
+                                                              verbose=TD_verbose )
         max_probs = np.max(normalized_probs, axis=1)
+        if TD_verbose:
+            print("max_probs  |  len(where_not_nan) != len(max_probs)  |  args")
+            print(max_probs, len(where_not_nan) != len(max_probs), "\t BETA={}\n".format(TD_BETA))
 
         if (len(where_not_nan) != len(max_probs)):
             return 0
         else:
             theoretical_max_TD_cls_term = 1 - 1/self._Classifier_._TableData_.num_classes
-            return (1-max_probs) * 1/theoretical_max_TD_cls_term
+            return ( (1-max_probs) * 1/theoretical_max_TD_cls_term )**(TD_BETA)
 
     def TD_classification_regression(self, names, args, **kwargs):
         """Target distribution using both classification & regression.
@@ -96,7 +102,10 @@ class Sampler():
                 regression_term = 0
 
         TAU = kwargs.pop("TAU", 0.5)
-        return TAU * classification_term + (1 - TAU) * regression_term
+        TD_BETA = kwargs.pop("TD_BETA", 1.0)
+        if kwargs.pop("TD_verbose", False):
+            print( "TAU: {0} | TD_BETA: {1}".format(TAU, TD_BETA) )
+        return ( TAU * classification_term + (1 - TAU) * regression_term )**(TD_BETA)
 
 
     def save_chain_step_history(self, key, chain_step_history, overwrite=False):
@@ -423,7 +432,7 @@ class Sampler():
                 pdf_val_at_point = [pdf_val_at_point]
 
             if add_mvns_together:
-                pdf_val_at_point = np.sum( pdf_val_at_point )
+                pdf_val_at_point = [ np.sum( pdf_val_at_point ) ]
             random_chances = np.random.uniform(low=0, high=max_val, size=len(pdf_val_at_point) )
             chance_above_distr = random_chances > pdf_val_at_point
 
@@ -571,7 +580,7 @@ class Sampler():
                              shuffle=False, norm_steps=False, \
                              add_mvns_together=False, \
                              var_mult=None, seed=None, n_repeats=1,
-                             max_iters = 1e4, verbose=False ):
+                             max_iters = 1e4, verbose=False, **kwargs ):
         """Given a step history of an MCMC, get N proposed points spread out
         in parameter space.
 

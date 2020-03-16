@@ -1,7 +1,7 @@
-from . import data
-from . import classify
-from . import regress
-from . import sample
+from psylib.cris.data import TableData
+from psylib.cris.classify import Classifier
+from psylib.cris.regress import Regressor
+from psylib.cris.sample import Sampler
 
 # generally useful imports
 import numpy as np
@@ -49,19 +49,19 @@ def populate_parameter_space( file_path, N_new_points=1, **kwargs ):
     output_cols = kwargs.get("output_cols", def_output_cols)
     class_col = kwargs.get("class_col", def_class_col) # single colum where we want to id different classes
 
-    table_obj = data.TableData( files, input_cols, output_cols, class_col,
+    table_obj = TableData( files, input_cols, output_cols, class_col,
                                 ignore_lines = kwargs.get("ignore_lines", 0 ),
                                 verbose = kwargs.get("verbose", False),
                                 omit_vals = kwargs.get("omit_vals", ['error', 'No_Run']), \
                                 n_neighbors=kwargs.get("n_neighbors", [4]))
 
-    cls_obj = classify.Classifier(table_obj)
+    cls_obj = Classifier(table_obj)
     cls_obj.train_everything(['rbf', 'linear'], verbose=False)
 
-    regr_obj = regress.Regressor(table_obj)
+    regr_obj = Regressor(table_obj)
     regr_obj.train_everything(["rbf", 'linear'], verbose=False)
 
-    sampler_obj = sample.Sampler( classifier = cls_obj, regressor = regr_obj )
+    sampler_obj = Sampler( classifier = cls_obj, regressor = regr_obj )
 
     init_pos = kwargs.get("init_pos", np.array([[0.5, 0.5]]) )
     alpha = kwargs.get("alpha", init_pos[0]/25 )
@@ -85,9 +85,17 @@ def populate_parameter_space( file_path, N_new_points=1, **kwargs ):
     return prop_points, pred_classes
 
 
+
+
+
+
+
+
+
 # I think this function above me should be named get proposed points
 # And then add another function called populate parameter space that iterates over proposed points
 # unitl some convergence on the fake data set or something
+
 
 def new_populate_parameter_space( N_new_points=1, TableData_kwargs = {},
                                   Classifier_kwargs={}, Regressor_kwargs={},
@@ -95,63 +103,34 @@ def new_populate_parameter_space( N_new_points=1, TableData_kwargs = {},
     """Testing"""
 
     # TableData
-    files = TableData_kwargs.pop("file_paths")
-    input_cols = TableData_kwargs.pop("input_cols")
-    output_cols = TableData_kwargs.pop("output_cols")
-    class_col = TableData_kwargs.pop("class_col")
-
-    table_obj = TableData( files, input_cols, output_cols, class_col,
-                           **TableData_kwargs)
+    table_obj = TableData(**TableData_kwargs)
 
     # Classifier
     cls_obj = Classifier(table_obj)
-    for name in Classifier_kwargs.pop("classifier_names", ["rbf"]):
-        cls_obj.train( name, **Classifier_kwargs)
+    cls_obj.train_everything(**Classifier_kwargs)
 
     # Regressor
     regr_obj = Regressor(table_obj)
-    regr_obj.train_everything( Regressor_kwargs.pop("regressor_names", ["rbf"]), **Regressor_kwargs)
+    regr_obj.train_everything(**Regressor_kwargs)
 
     # Sampler
-    if Sampler_kwargs.pop("init_with_class_and_regression", True):
-        sampler_obj = Sampler( classifier = cls_obj, regressor = regr_obj )
-    else:
-        sampler_obj = Sampler( classifier = cls_obj, regressor = None )
+    sampler_obj = Sampler( classifier = cls_obj, regressor = regr_obj )
 
-    T_max = Sampler_kwargs.pop("T_max", 50)
-    N_tot = Sampler_kwargs.pop("N_tot", 500)
-    init_pos = Sampler_kwargs.pop("init_pos", [0,0])
-    target_dist_name = Sampler_kwargs.pop("target_dist_name", "TD_classification")
-    if target_dist_name == "TD_classification":
-        target_dist = sampler_obj.TD_classification
-    elif target_dist_name == "TD_classification_regression":
-        target_dist = sampler_obj.TD_classification_regression
-    elif target_dist_name == "TD_2d_analytic":
-        target_dist = sampler_obj.TD_2d_analytic
-    else:
-        raise ValueError("Use a supported target distribution.")
-
-    interpolation_name = Sampler_kwargs.pop("interpolation_name", "rbf")
-    if target_dist_name == "TD_classification_regression":
-        if isinstance(interpolation_name, list):
-            assert len(interpolation_name)==2
-        else:
-            raise ValueError("TD_classification_regression requires two strings in a list for 'interpolation_name'.")
-
+    target_dist_name = Sampler_kwargs.get("target_dist", "TD_classification")
+    exec( "target_dist_obj =  sampler_obj.{0:s}".format(target_dist_name) )
+    exec( "Sampler_kwargs['target_dist'] = target_dist_obj" )
     # Sampler.run_PTMCMC
-    chain_step_history, T_list = sampler_obj.run_PTMCMC( T_max, N_tot, init_pos, target_dist,
-                                                        interpolation_name, **Sampler_kwargs )
+    chain_step_history, T_list = sampler_obj.run_PTMCMC(**Sampler_kwargs)
     last_chain_hist = chain_step_history[len(T_list)-1]
 
     # propose new points
     if N_new_points == 1:
         proposed_point = last_chain_hist[-1]
-        cls_name = Propose_kwargs.pop("pred_classifier_name", "rbf")
+        cls_name = Propose_kwargs.get("pred_classifier_name", "rbf")
         pred_class, max_probs, where_not_nan = cls_obj.get_class_predictions(cls_name, proposed_point)
         return proposed_point, pred_class
     else:
-        kappa = Propose_kwargs.pop("kappa",100)
-
+        kappa = Propose_kwargs.get("kappa",150)
         proposed_points, kappa = sampler_obj.get_proposed_points(last_chain_hist, N_new_points, kappa,
                                                                  **Propose_kwargs)
 
