@@ -150,8 +150,10 @@ class TableData():
         due to zero values in the output data. Default (None) uses nan.
     verbose : bool, optional
         Print statements with extra info.
+    read_csv_kwargs : dict, optional
+        Kwargs passed to the pandas function 'read_csv()'.
     **kwargs : dict, optional
-        Kwargs used in the pandas function 'read_csv()'.
+        Extra kwargs
 
     Attributes
     ----------
@@ -170,7 +172,8 @@ class TableData():
     def __init__(self, table_paths, input_cols, output_cols, class_col_name, \
                     my_DataFrame = None, omit_vals=None, omit_cols=None, \
                     subset_interval=None, verbose=False, my_colors=None, \
-                    neighbor=None, n_neighbors=None, undefined_p_change_val=None,**kwargs ):
+                    neighbor=None, n_neighbors=None, undefined_p_change_val=None,
+                    read_csv_kwargs = {}, **kwargs ):
 
         start_time = time.time()
         self._for_info_ = []  # storing info strings
@@ -193,7 +196,7 @@ class TableData():
                 info_str_02 = "\t'{0}'".format(path)
                 self.__vb_helper(verbose, info_str_02)
 
-                df = pd.read_csv( path, **kwargs )
+                df = pd.read_csv( path, **read_csv_kwargs )
                 self._df_list_.append( df )
                 self._df_index_keys_.append( 'df' + str(num) )
 
