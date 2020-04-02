@@ -1,7 +1,7 @@
-from psylib.cris.data import TableData
-from psylib.cris.classify import Classifier
-from psylib.cris.regress import Regressor
-from psylib.cris.sample import Sampler
+from cris.data import TableData
+from cris.classify import Classifier
+from cris.regress import Regressor
+from cris.sample import Sampler
 
 # generally useful imports
 import numpy as np
