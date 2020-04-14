@@ -8,8 +8,7 @@ from collections import OrderedDict
 import scipy.stats
 from scipy.spatial.distance import pdist
 
-# extra: something saying one extra point is not near other currently running point
-#        maybe also include check that it's not already in a grid cell that has a simulation
+from cris.utils import check_dist
 
 class Sampler():
     """
@@ -20,6 +19,7 @@ class Sampler():
     def __init__( self, classifier = None, regressor = None ):
         self._Classifier_ = classifier
         self._Regressor_ = regressor
+        self._TableData_ = self._Classifier_._TableData_
 
         if self._Classifier_ is None:
             pass
@@ -77,6 +77,9 @@ class Sampler():
         TAU : float, optional
             Relative weight of classification to regression term.
             By default it's set to 0.6.
+        TD_BETA : float, optional
+            Raises the entire expression to the power of BETA. Used
+            for smoothing or sharpening the distribution. Default is 1.
         """
         normalized_probs, where_not_nan = self._Classifier_.return_probs( names[0], args, \
                                                               verbose=False )

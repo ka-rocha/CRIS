@@ -173,7 +173,6 @@ class TableData():
                     my_DataFrame = None, omit_vals=None, omit_cols=None, \
                     subset_interval=None, verbose=False, my_colors=None, \
                     neighbor=None, n_neighbors=None, undefined_p_change_val=None,
-                    # log_e_cols = None, log_10_cols=None,
                     read_csv_kwargs = {}, **kwargs ):
 
         start_time = time.time()
@@ -253,14 +252,6 @@ class TableData():
         output_cols = [ i for i in output_cols if i in self.col_names ]
         self._input_  = self._full_data_[input_cols]
         self._output_ = self._full_data_[output_cols]
-
-        # log base e and 10 of input columns
-        # if log_e_cols is not None:
-        #     for log_col_name in log_e_cols:
-        #         self._input_["log_e_"+log_col_name] = np.log( self._full_data_[log_col_name] )
-        # if log_10_cols is not None:
-        #     for log_col_name in log_10_cols:
-        #         self._input_["log_10_"+log_col_name] = np.log( self._full_data_[log_col_name] )
 
         # --------- classification variables ---------
         try:
