@@ -54,11 +54,16 @@ class Regressor():
         max_apc_vals = []
         apc_dfs_per_class = self.regr_dfs_per_class.copy()
         for key, val in apc_dfs_per_class.items():
-            cols = [i for i in val if "APC" not in i]
-            apc_dfs_per_class[key] = val.drop( columns = cols )
+            non_APC_cols = [i for i in val.columns if "APC" not in i]
+            if len(non_APC_cols) == len(val.columns):
+                continue # no APC cols to work on
+            apc_dfs_per_class[key] = val.drop( columns = non_APC_cols )
             abs_max_val = np.nanmax( abs(apc_dfs_per_class[key].to_numpy()) )
             max_apc_vals.append( abs_max_val )
-        self.abs_max_APC = np.max( max_apc_vals )
+        if len(max_apc_vals) != 0:
+            self.abs_max_APC = np.max( max_apc_vals )
+        else:
+            self.abs_max_APC = None
 
         self._undefined_p_change_val_ = self._TableData_._return_data_("undefined_p_change_val")
 
