@@ -8,8 +8,6 @@ from collections import OrderedDict
 import scipy.stats
 from scipy.spatial.distance import pdist
 
-from cris.utils import check_dist
-
 class Sampler():
     """
     Sampler
@@ -52,7 +50,7 @@ class Sampler():
         """Target distribution using classification.
         Namely: f(x) = 1 - max[P(class)]
 
-        If classification probability is Nan: f(x) = 0
+        If classification probability is Nan: f(x) = 1E-16
         """
         TD_verbose = kwargs.get("TD_verbose", False)
         TD_BETA = kwargs.get("TD_BETA", 1.0)
@@ -65,21 +63,29 @@ class Sampler():
             print(max_probs, len(where_not_nan) != len(max_probs), "\t BETA={}\n".format(TD_BETA))
 
         if (len(where_not_nan) != len(max_probs)):
-            return 0
+            return 1E-16
         else:
+            # if the target dist. is exactly zero, it will never move from initial point
+            if max_probs == 1:
+                max_probs = 1 - 1E-16
             theoretical_max_TD_cls_term = 1 - 1/self._Classifier_._TableData_.num_classes
             return ( (1-max_probs) * 1/theoretical_max_TD_cls_term )**(TD_BETA)
 
     def TD_classification_regression(self, names, args, **kwargs):
         """Target distribution using both classification & regression.
 
-        kwargs
-        TAU : float, optional
+        Parameters:
+        TD_A1 : float, optional
+            Scaling factor inside the Log regression error term.
+            (Default = 0.5)
+        TD_TAU : float, optional
             Relative weight of classification to regression term.
-            By default it's set to 0.6.
+            (Default = 0.6)
         TD_BETA : float, optional
-            Raises the entire expression to the power of BETA. Used
+            Exponent of the entire target distribution. Used
             for smoothing or sharpening the distribution. Default is 1.
+        TD_verbose : bool, optional
+            Print more diagnostic information.
         """
         normalized_probs, where_not_nan = self._Classifier_.return_probs( names[0], args, \
                                                               verbose=False )
@@ -88,27 +94,29 @@ class Sampler():
         cls_key = [self._Classifier_.class_id_mapping[i] for i in pred_class_ids]
 
         theoretical_max_TD_cls_term = 1 - 1/self._Classifier_._TableData_.num_classes
+        if max_probs==1:
+            max_probs = 1 - 1E-16
         classification_term = (1 - max_probs) * 1/theoretical_max_TD_cls_term
 
-        if (len(where_not_nan) != len(max_probs)):
-            return 0
+        if (len(where_not_nan) != len(normalized_probs)):
+            return 1E-16
         else:
             if isinstance(self._Regressor_.regr_dfs_per_class[cls_key[0]], pd.DataFrame):
                 max_APC, which_col_max = self._Regressor_.get_max_APC_val( names[1], cls_key[0], args )
                 self._MAX_APC_str_.append(which_col_max)
 
-                A1 = kwargs.pop("A1", 0.5)
+                A1 = kwargs.get("TD_A1", 0.5)
                 scaling_log_func = lambda A1, x : np.log10( A1 * np.abs(x) + 1 )
                 A0 = 1/scaling_log_func( A1, self._Regressor_.abs_max_APC )
                 regression_term = A0 * scaling_log_func( A1, max_APC )
             else:
-                regression_term = 0
+                regression_term = 1E-16
 
-        TAU = kwargs.pop("TAU", 0.5)
-        TD_BETA = kwargs.pop("TD_BETA", 1.0)
-        if kwargs.pop("TD_verbose", False):
-            print( "TAU: {0} | TD_BETA: {1}".format(TAU, TD_BETA) )
-        return ( TAU * classification_term + (1 - TAU) * regression_term )**(TD_BETA)
+        TD_TAU = kwargs.get("TD_TAU", 0.5)
+        TD_BETA = kwargs.get("TD_BETA", 1.0)
+        if kwargs.get("TD_verbose", False):
+            print( "TD_TAU: {0} | TD_BETA: {1}".format(TD_TAU, TD_BETA) )
+        return ( TD_TAU * classification_term + (1 - TD_TAU) * regression_term )**(TD_BETA)
 
 
     def save_chain_step_history(self, key, chain_step_history, overwrite=False):
@@ -200,6 +208,8 @@ class Sampler():
             init_pos = np.array( init_pos )
         if init_pos.ndim > 1:
             raise ValueError("init_pos has {0} dimensions, must be one dimensional.".format(init_pos.ndim))
+
+        # TODO: start them in random positions
         this_iter_step_loc = [init_pos]*num_chains
 
         # Accept ratio tracker
@@ -329,6 +339,10 @@ class Sampler():
             Total number of accepted steps.
         reject : int
             Total number of rejected steps.
+
+        Notes
+        -----
+        Assumes uniform priors and a symetric jump proposal (gaussian).
         """
         if not isinstance( step_history, np.ndarray ):
             step_history = np.array(step_history)
@@ -410,7 +424,9 @@ class Sampler():
         accepted_points : ndarray
         rejected_points : ndarray
         """
-        n_dim = len( self._Classifier_.input_data[0] )
+        original_training_data = self._Classifier_.input_data
+        how_many_training_data = len(original_training_data)
+        n_dim = len( original_training_data[0] )
         # approximate scaling of the variance given a set of N points to propose
         # the filling factor Kappa is not generally known a priori
         if var_mult is None:
@@ -422,13 +438,15 @@ class Sampler():
         single_MVN = scipy.stats.multivariate_normal( np.zeros(n_dim), Covariance )
         max_val = 1/np.sqrt( (2*np.pi)**(n_dim) * np.linalg.det(Covariance) )
 
-        accepted_points = []; rejected_points = []
+        # treat the training data as already accepted points
+        accepted_points = list(original_training_data)
+        rejected_points = []
         for step in step_history:
             if len(accepted_points) < 1:
                 accepted_points.append( step )
                 continue
 
-            # distance: far is this point from all the accepted_points
+            # distance: how far is this point from all the accepted_points
             dist_to_acc_pts =  step - np.array(accepted_points)
             pdf_val_at_point =  single_MVN.pdf( dist_to_acc_pts )
             if isinstance(pdf_val_at_point, float):
@@ -444,7 +462,9 @@ class Sampler():
             else:
                 rejected_points.append( step )
 
-        return np.array(accepted_points), np.array(rejected_points)
+        # remove training data from accepted points
+        only_new_accpeted_points = accepted_points[how_many_training_data:]
+        return np.array(only_new_accpeted_points), np.array(rejected_points)
 
 
     def do_density_logic( self, step_history, N_points, Kappa,\
@@ -583,7 +603,7 @@ class Sampler():
                              shuffle=False, norm_steps=False, \
                              add_mvns_together=False, \
                              var_mult=None, seed=None, n_repeats=1,
-                             max_iters = 1e4, verbose=False, **kwargs ):
+                             max_iters = 1e3, verbose=False, **kwargs ):
         """Given a step history of an MCMC, get N proposed points spread out
         in parameter space.
 
@@ -606,6 +626,9 @@ class Sampler():
         seed : float, optional
         n_iters: int, optional
         verbose : bool, optional
+        show_plots : bool, optional
+            Show 2D plot of proposed points with step history and
+            training data.
 
         Returns
         -------
@@ -618,7 +641,7 @@ class Sampler():
 
         Notes
         -----
-        Will automatically exit if it goes through 500 iterations
+        Will automatically exit if it goes through 1000 iterations
         without converging on the desired number of points.
         """
 
@@ -639,6 +662,10 @@ class Sampler():
                                                         var_mult = var_mult, \
                                                         add_mvns_together = add_mvns_together, \
                                                         verbose = False )
+            if len(acc_pts) == 0:
+                Kappa = Kappa * 0.5
+                iters += 1
+                continue
 
             average_dist_between_acc_points = np.mean( pdist( acc_pts ) )
             if len(acc_pts) == N_points:
@@ -682,7 +709,8 @@ class Sampler():
             print( "Kappas: \n{0}".format(np.array(good_kappas)) )
             print( "loc: {0}".format(where_best_distribution) )
 
-            #self.make_prop_points_plots(step_history, best_acc_pts)
+        if kwargs.get("show_plots", False):
+            self.make_prop_points_plots(step_history, best_acc_pts)
         return best_acc_pts, best_Kappa
 
 
@@ -690,14 +718,15 @@ class Sampler():
                                     show_fig = True, save_fig=False ):
         """Plot the proposed / accepted points over the step history."""
         axis1, axis2 = axes
-        plt.figure(figsize=(4,4), dpi=90)
-        plt.scatter( step_hist.T[axis1], step_hist.T[axis2], alpha=0.5, label="step history" )
-        plt.scatter( prop_points.T[axis1], prop_points.T[axis2], color='pink', label="accepted points" )
-        plt.xlim( self._min_vals_[axis1], self._max_vals_[axis1] )
-        plt.ylim( self._min_vals_[axis2], self._max_vals_[axis2] )
-        plt.legend(loc='best')
-        plt.show()
-        return None
+        fig, sub = plt.subplots( nrows=1, ncols=1, figsize=(4,4), dpi=90)
+        training_data = self._Classifier_.input_data
+        sub.scatter( training_data.T[axis1], training_data.T[axis2], color="k", marker='x', label="training data" )
+        sub.scatter( step_hist.T[axis1], step_hist.T[axis2], color="C0", alpha=0.5, label="step history" )
+        sub.scatter( prop_points.T[axis1], prop_points.T[axis2], color='pink', label="new proposed points" )
+        sub.set_xlim( self._min_vals_[axis1], self._max_vals_[axis1] )
+        sub.set_ylim( self._min_vals_[axis2], self._max_vals_[axis2] )
+        plt.legend(loc='best', bbox_to_anchor=[1, 0, 0.22,1])
+        return fig, sub
 
 
     def make_trace_plot( self, chain_holder, T_list, Temp, save_fig=False, show_fig=True ):
