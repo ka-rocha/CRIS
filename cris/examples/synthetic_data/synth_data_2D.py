@@ -105,20 +105,39 @@ if (__name__ == "main"):
     plt.show()
 
 
+def get_raw_output_2D(x,y):
+    """Get the raw output for classification and regression functions
+    for the 2D synthetic data set. Original class data to strings given by
+    the following relation {-1:"A", 0:"B", 1:"C", 2:"D"}. """
+    if isinstance( x, (float,int) ):
+        x = np.array([x]); y=np.array([y])
+    elif isinstance(x, list):
+        x= np.array(x); y=np.array(y)
 
+    classification_output = cls_curve(x,y)
+    regression_output = regr_func(x,y)
+    return classification_output, regression_output
 
-# For queries after initial sampling is done
-def get_output(x,y):
-    """For a set of points in x,y in the range (-3,3)
-    return the classification and regression output as
-    defined in 'analytic_class_regr.py'.
+# For queries
+def get_output_2D(x,y):
+    """For a set of query points (x,y) in the range (-3,3)
+    return a DataFrame with the inputs and outputs for
+    classificaiton and regression.
     """
     if isinstance( x, (float,int) ):
         x = np.array([x]); y=np.array([y])
     elif isinstance(x, list):
         x= np.array(x); y=np.array(y)
 
-    cls_results = cls_curve(x,y)
-    regr_out = regr_func(x,y)
+    cls_results, regr_out = get_raw_output_2D(x,y)
+    if x.ndim > 1 or y.ndim > 1:
+        cls_results = cls_results.flatten()
+        regr_out = regr_out.flatten()
+        x = x.flatten(); y = y.flatten()
     str_results = np.array( [mapping[val] for val in cls_results.astype(int)] )
-    return str_results, regr_out
+    data_frame = pd.DataFrame()
+    data_frame["input_1"] = x
+    data_frame["input_2"] = y
+    data_frame["class"] = str_results
+    data_frame["output_1"] = regr_out
+    return data_frame
