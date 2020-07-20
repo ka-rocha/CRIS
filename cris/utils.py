@@ -1,10 +1,3 @@
-from cris.data import TableData
-from cris.classify import Classifier
-from cris.regress import Regressor
-from cris.sample import Sampler
-
-from cris.examples.data.analytic_class_regr import get_output
-
 # generally useful imports
 import numpy as np
 import matplotlib.pyplot as plt
@@ -13,68 +6,47 @@ import time
 import copy
 from scipy.spatial.distance import cdist
 
-DEFAULT_TABLEDATA_KWARGS = {
-    "table_paths": ["../examples/data/synth_data.dat"],
-    "input_cols": ["input_1", "input_2"],
-    "output_cols": ["class", "output_1"],
-    "class_col_name":"class",
-    "n_neighbors":[2],
-    "my_DataFrame":None,
-    "verbose":False,
-    }
+from cris.data import TableData
+from cris.classify import Classifier
+from cris.regress import Regressor
+from cris.sample import Sampler
 
-DEFAULT_CLASSIFICATION_KWARGS = {
-    "classifier_names": ["linear"],
-    "verbose":False,
-    }
+from cris.examples.synthetic_data.synth_data_2D import get_output_2D
+from cris.examples.synthetic_data.synth_data_3D import get_output_3D
 
-DEFAULT_REGRESSION_KWARGS = {
-    "regressor_names": ["rbf",],
-    "verbose":False,
-    }
+# for parsing ini files
+from configparser import ConfigParser
+from ast import literal_eval
 
-DEFAULT_SAMPLER_KWARGS = {
-    "T_max":50,
-    "N_tot":500,
-    "init_pos": [0,0],
-    "target_dist": "TD_classification",
-    "classifier_name": "linear",
-    "c_spacing":1.3,
-    "alpha": [1.,1.],
-    "verbose":True,
-    "trace_plots":False,
-    "TD_verbose": False,  # target distribution kwarg
-    "TD_BETA": 1.0,  # target distribution kwarg
-}
+def parse_inifile(path):
+    """Parse an ini file to run psy-cris method 'get_new_query_points'.
 
-DEFAULT_PROPOSE_KWARGS = {
-    "kappa":100,
-    "shuffle":False,
-    "norm_steps":False,
-    "add_mvns_together":False,
-    "var_mult":None,
-    "seed":None,
-    "n_repeats":1,
-    "max_iters":5e3,
-    "verbose":False,
-    "pred_classifier_name": "linear",
-    }
+    Parameters
+    ---------
+    path : str
+        Path to ini file.
 
-DEFAULT_ALL_KWARGS = {
-    "TableData_kwargs":DEFAULT_TABLEDATA_KWARGS,
-    "Classifier_kwargs":DEFAULT_CLASSIFICATION_KWARGS,
-    "Regressor_kwargs":DEFAULT_REGRESSION_KWARGS,
-    "Sampler_kwargs":DEFAULT_SAMPLER_KWARGS,
-    "Propose_kwargs":DEFAULT_PROPOSE_KWARGS,
-    }
+    Returns
+    -------
+    all_kwargs_dict : dict
+        Nested dictionary of parsed inifile kwargs.
+    """
+    all_kwargs_dict = {}
+    confparse = ConfigParser()
+    confparse.read( path )
+    for sect in confparse:
+        if sect == "DEFAULT": continue
+        section_dict = {}
+        for var in confparse[sect]:
+            section_dict[var] = literal_eval( confparse[sect][var] )
+        all_kwargs_dict[sect + "_kwargs"] = section_dict
+    return all_kwargs_dict
 
-def get_all_default_kwargs():
-    return DEFAULT_ALL_KWARGS
 
 def get_new_query_points( N_new_points=1, TableData_kwargs = {},
                                   Classifier_kwargs={}, Regressor_kwargs={},
-                                  Sampler_kwargs={}, Propose_kwargs={}, threshold=1e-5 ):
-    """Run the cris algorithm to propose new query points to be labeled.
+                                  Sampler_kwargs={}, Proposal_kwargs={}, threshold=1e-5 ):
+    """Run the psy-cris algorithm to propose new query points to be labeled.
 
     Parameters
     ----------
@@ -88,7 +60,7 @@ def get_new_query_points( N_new_points=1, TableData_kwargs = {},
         Kwargs used the Regressor method 'train_everything'.
     Sampler_kwargs : dict, optinal
         Kwargs used for choosing Sampler target distribution and the method 'run_PTMCMC'.
-    Propose_kwargs : dict, optional
+    Proposal_kwargs : dict, optional
         Kwargs used in the Sampler method 'get_proposed_points' and the Classifier
         method 'get_class_predictions'.
 
@@ -108,7 +80,7 @@ def get_new_query_points( N_new_points=1, TableData_kwargs = {},
     cls_obj.train_everything(**Classifier_kwargs)
 
     # Regressor
-    if Regressor_kwargs is not None:
+    if Regressor_kwargs.get("do_regression", False):
         regr_obj = Regressor(table_obj)
         regr_obj.train_everything(**Regressor_kwargs)
     else:
@@ -125,17 +97,17 @@ def get_new_query_points( N_new_points=1, TableData_kwargs = {},
     last_chain_hist = chain_step_history[len(T_list)-1]
 
     # burn in - default to use entire chain
-    where_to_cut = int( len(last_chain_hist) * Propose_kwargs.get("cut_fraction", 0) )
+    where_to_cut = int( len(last_chain_hist) * Proposal_kwargs.get("cut_fraction", 0) )
     last_chain_hist = last_chain_hist[where_to_cut:]
 
     # propose new points
-    classifier_name = Propose_kwargs.get("pred_classifier_name", "rbf")
+    classifier_name = Proposal_kwargs.get("pred_classifier_name", "rbf")
     if classifier_name not in Classifier_kwargs.get('classifier_names'):
         raise Exception("Predictions must be with a trained classifier. '{0}' was given".format(classifier_name) )
 
-    kappa = Propose_kwargs.get("kappa",150)
+    kappa = Proposal_kwargs.get("kappa",150)
     proposed_points, final_kappa = sampler_obj.get_proposed_points(last_chain_hist, N_new_points, kappa,
-                                                                    **Propose_kwargs)
+                                                                    **Proposal_kwargs)
     pred_class, max_probs, where_not_nan = cls_obj.get_class_predictions(classifier_name, proposed_points, return_ids=False)
     return proposed_points, pred_class
 
@@ -149,11 +121,8 @@ def get_new_query_points( N_new_points=1, TableData_kwargs = {},
 ################################################################################
 
 
-
-
-
-def do_dynamic_sampling( N_starting_points=100, N_final_points=400, new_points_per_iter=20,
-                        threshold=1e-6, jitter=False, verbose=False, **all_kwargs  ):
+def do_dynamic_sampling( N_final_points=100, new_points_per_iter=20, verbose=False,
+                        threshold=1e-5, N_starting_points=100, jitter=False, dim=2, **all_kwargs  ):
     """For a given number of starting and ending points, run the cris algorithm iteratively
     in step sizes of new_points_per_iter. After each iteration, query points are identified
     using the original 2D snythetic data set.
@@ -179,17 +148,21 @@ def do_dynamic_sampling( N_starting_points=100, N_final_points=400, new_points_p
         Dictionary of all_kwargs passed to get_new_query_points defining
         how every part of the cris algorithm is implemented.
     """
+
     t0 = time.time()
 
     original_kwargs = copy.deepcopy(all_kwargs) #!!!
 
     # analytic classification and regression data set
-    my_data = get_regular_grid_df( N_starting_points, jitter=jitter )
+    my_data = get_regular_grid_df( N_starting_points, jitter=jitter, dim=dim )
     all_kwargs["TableData_kwargs"]["my_DataFrame"] = my_data
     dfs_per_iters = [my_data]; preds_per_iter = [None]
 
     N_total = int(N_final_points - N_starting_points)
-    if verbose: print("Sampling {} total points...".format(N_total))
+    if verbose:
+        print("Sampling {} total points...".format(N_total))
+        print("DIM: {}".format(dim))
+
     num_loops = 0; N_sampled_points = 0
     while N_sampled_points < N_total:
         start_time = time.time()
@@ -217,43 +190,42 @@ def do_dynamic_sampling( N_starting_points=100, N_final_points=400, new_points_p
         # Update dicts
         all_kwargs["TableData_kwargs"]["file_path_list"] = None
         all_kwargs["TableData_kwargs"]["my_DataFrame"] = my_data
-        random_init_pos = np.random.uniform(low=-2,high=2, size=(2))
+        if dim == 2:
+            random_init_pos = np.random.uniform(low=-2,high=2, size=(2))
+        elif dim == 3:
+            random_init_pos = np.random.uniform(low=-0.5,high=0.5, size=(3))
         all_kwargs["Sampler_kwargs"]["init_pos"] = random_init_pos
 
         # Check distances
-        old_points = my_data[["input_1", "input_2"]].to_numpy()
+        if dim == 2:
+            old_points = my_data[["input_1", "input_2"]].to_numpy()
+        elif dim == 3:
+            old_points = my_data[["input_1", "input_2", "input_3"]].to_numpy()
         where_good_bools = check_dist( old_points, new_points, threshold=threshold )
         if np.sum(where_good_bools) != len(new_points):
             print("We are getting rid of {} points below thresh this iter.".format(len(new_points)-np.sum(where_good_bools)) )
         new_points = new_points[where_good_bools]
 
         # Evaluate query points with anayltic dataset
-        class_results, regr_out = get_output( *new_points.T )
+        if dim == 2:
+            output_new_points_df = get_output_2D( *new_points.T )
+        elif dim == 3:
+            output_new_points_df = get_output_3D( *new_points.T )
 
-        data_products = [new_points.T[0], new_points.T[1], class_results, regr_out]
-        new_df = pd.DataFrame()
-        for i, col_name in enumerate(my_data.keys()):
-            new_df[col_name] = data_products[i]
-
-        new_data = my_data.append( new_df, ignore_index=True )
+        new_data = my_data.append( output_new_points_df, ignore_index=True )
         # Append data to be returned
         dfs_per_iters.append( new_data )
         my_data = new_data.copy()
         # Append data to be returned
         preds_per_iter.append( cls_preds )
 
-        where_to_cut = int(N_starting_points + N_sampled_points)
-        fig, subs = plt.subplots(1,1, figsize=(3.5,3.5), dpi=100)
-        subs.set_title("SAMPLE {0}".format(num_loops))
-        subs.plot( *random_init_pos, '+', markeredgewidth=1.5, color="red", label="init_pos")
-        subs.scatter( my_data["input_1"][0:where_to_cut], my_data["input_2"][0:where_to_cut],
-                     alpha=0.5, color = "dodgerblue", label="training")
-        subs.scatter( my_data["input_1"][where_to_cut:], my_data["input_2"][where_to_cut:],
-                     marker = 'x', color = "C2", label="proposed" )
-        subs.set_xlabel("{0} new points this iter".format(np.sum(where_good_bools)))
-        plt.legend(bbox_to_anchor=[1, 0, 0.22,1])
-        plt.show()
 
+        where_to_cut = int(N_starting_points + N_sampled_points)
+
+        if dim == 2:
+            plot_proposed_points_2D(where_to_cut, num_loops, random_init_pos, my_data, where_good_bools)
+        elif dim == 3:
+            plot_proposed_points_3D(where_to_cut, num_loops, random_init_pos, my_data, where_good_bools)
 
         N_sampled_points += len(new_points)
         num_loops += 1
@@ -266,6 +238,50 @@ def do_dynamic_sampling( N_starting_points=100, N_final_points=400, new_points_p
         print( "Total time: {:.2f}s".format(time.time()-t0)  )
 
     return dfs_per_iters, preds_per_iter
+
+
+
+def plot_proposed_points_2D( where_to_cut, num_loops, random_init_pos, my_data, where_good_bools ):
+        fig, subs = plt.subplots(1,1, figsize=(3.5,3.5), dpi=100)
+        subs.set_title("SAMPLE {0}".format(num_loops))
+        subs.plot( *random_init_pos, '+', markeredgewidth=1.5, color="red", label="init_pos")
+        subs.scatter( my_data["input_1"][0:where_to_cut], my_data["input_2"][0:where_to_cut],
+                     alpha=0.5, color = "dodgerblue", label="training")
+        subs.scatter( my_data["input_1"][where_to_cut:], my_data["input_2"][where_to_cut:],
+                     marker = 'x', color = "C2", label="proposed" )
+        subs.set_xlabel("{0} new points this iter".format(np.sum(where_good_bools)))
+        plt.legend(bbox_to_anchor=[1, 0, 0.22,1])
+        plt.show()
+
+
+def plot_proposed_points_3D( where_to_cut, num_loops, random_init_pos, my_data, where_good_bools ):
+        fig, subs = plt.subplots(1,2, figsize=(8,3.5), dpi=100)
+        subs[0].set_title("SAMPLE {0}".format(num_loops))
+        subs[0].plot( random_init_pos[0], random_init_pos[1],
+                     '+', markeredgewidth=1.5, color="red", label="init_pos")
+        subs[0].scatter( my_data["input_1"][0:where_to_cut],
+                         my_data["input_2"][0:where_to_cut],
+                         alpha=0.5, color = "dodgerblue", label="training")
+        subs[0].scatter( my_data["input_1"][where_to_cut:],
+                         my_data["input_2"][where_to_cut:],
+                         marker = 'x', color = "C2", label="proposed" )
+        subs[0].set_xlabel("X - {0} new points this iter".format(np.sum(where_good_bools)))
+        subs[0].set_ylabel("Y")
+
+
+        subs[1].plot( random_init_pos[0], random_init_pos[2],
+                     '+', markeredgewidth=1.5, color="red", label="init_pos")
+        subs[1].scatter( my_data["input_1"][0:where_to_cut],
+                         my_data["input_3"][0:where_to_cut],
+                         alpha=0.5, color = "dodgerblue", label="training")
+        subs[1].scatter( my_data["input_1"][where_to_cut:],
+                         my_data["input_3"][where_to_cut:],
+                         marker = 'x', color = "C2", label="proposed" )
+        subs[1].set_xlabel("X")
+        subs[1].set_ylabel("Z")
+
+        plt.legend(bbox_to_anchor=[1, 0, 0.22,1])
+        plt.show()
 
 
 def check_dist( original, proposed, threshold = 1e-5):
@@ -297,10 +313,10 @@ def check_dist( original, proposed, threshold = 1e-5):
     return np.array(proposed_above_thresh_for_all_original)
 
 
-def get_regular_grid_df(N=100, jitter=False,verbose=False, N_ppa=None):
+def get_regular_grid_df(N=100, jitter=False, verbose=False, N_ppa=None, dim=2):
     """Given N total points, produce an even grid with
     approximately the same number of evenly spaced points sampled
-    from the analytic data set.
+    from the analytic data set (2D or 3D).
 
     The number of returned grid points is N only if N is a perfect square.
     Otherwise use N_ppa to define number of points per axis.
@@ -312,8 +328,10 @@ def get_regular_grid_df(N=100, jitter=False,verbose=False, N_ppa=None):
     jitter : bool, optional
         Place the center of the grid randomly around (0,0) in the range of
         +/- 1/2 bin width while keeping the span in each axis at 6.
-    N_ppa : array-like, optional
+    N_ppa : array, optional
         Numbers of points per axis. If provided, it overrides N.
+    dim : int, optional
+        Dimensionality of synthetic data set. (2 or 3)
     verbose : bool, optional
         Print some diagnostics.
 
@@ -323,44 +341,66 @@ def get_regular_grid_df(N=100, jitter=False,verbose=False, N_ppa=None):
         DataFrame of true data drawn from the analytic classification
         and regression functions.
     """
+    dim = int(dim)
+    if dim != 2 and dim != 3:
+        raise ValueError( "Dimensionality {} not supported.".format(dim) )
 
     if N_ppa is None:
-        root_of_N = np.sqrt(N)
-        x_res = int(root_of_N);  y_res = int(root_of_N)
+        root_of_N = np.round( N**(1.0/dim) )
+        x_res = int(root_of_N)
+        y_res = int(root_of_N)
+        if dim == 3:
+            z_res = int(root_of_N)
     else:
-        x_res = int(N_ppa[0]);  y_res = int(N_ppa[1])
+        x_res = int(N_ppa[0])
+        y_res = int(N_ppa[1])
+        if dim == 3:
+            z_res = int(N_ppa[2])
+
     if verbose:
-        print("x_res: {0}, y_res: {1}\nx*y:{2}".format(x_res, y_res, x_res*y_res) )
+        if dim == 2:
+            print("x_res: {0}, y_res: {1}\nx*y:{2}".format(x_res, y_res, x_res*y_res) )
+        elif dim == 3:
+            print("x_res: {0}, y_res: {1}, z_res{2}\nx*y*z:{3}".format(x_res,y_res,z_res, x_res*y_res*z_res) )
+
     if jitter:
-        bin_width_x = 6 / x_res  # span / num bins
-        bin_width_y = 6 / y_res
-        random_center = np.random.uniform( low=(-0.5), high=(0.5), size=(2) )
-        center_x = bin_width_x*random_center[0]; center_y = bin_width_y*random_center[1]
+        if dim == 2:
+            bin_widths = 6 / np.array([x_res, y_res]) # span / num bins
+        elif dim == 3:
+            bin_widths = 2 / np.array([x_res, y_res, z_res]) # span / num bins
+        random_center = np.random.uniform( low=(-0.5), high=(0.5), size=(dim) )
+        center_point = bin_widths * random_center
     else:
-        center_x = 0; center_y = 0
-    X, Y = np.meshgrid( np.linspace(-3+center_x,3+center_x,x_res),
-                        np.linspace(-3+center_y,3+center_y,y_res) )
-    stacked_points = np.concatenate( (np.vstack(X.flatten()), np.vstack(Y.flatten())), axis=1  )
+        center_point = np.array([0,0,0])
 
-    from cris.examples.data.analytic_class_regr import get_output
-    class_result, regr_output = get_output( *stacked_points.T )
+    if verbose:
+        print( "center_point : {}".format(center_point) )
 
-    extra_points = pd.DataFrame()
-    extra_points["input_1"] = stacked_points.T[0]
-    extra_points["input_2"] = stacked_points.T[1]
-    extra_points["class"] = class_result
-    extra_points["output_1"] = regr_output
-    return extra_points
+    if dim == 2:
+        center_x, center_y = center_point[:2]
+        X, Y = np.meshgrid( np.linspace(-3+center_x,3+center_x,x_res),
+                            np.linspace(-3+center_y,3+center_y,y_res) )
+        return get_output_2D(X,Y)
+
+    elif dim == 3:
+        center_x, center_y, center_z = center_point[:3]
+        X, Y, Z = np.meshgrid( np.linspace(-1+center_x,1+center_x,x_res),
+                               np.linspace(-1+center_y,1+center_y,y_res),
+                               np.linspace(-1+center_z,1+center_z,z_res) )
+        return get_output_3D(X,Y,Z)
 
 
-def get_random_grid_df(N):
+
+def get_random_grid_df(N, dim=2):
     """Given N total points, produce a randomly sampled grid drawn
-    from the analytic data set.
+    from the analytic data set (2D or 3D).
 
     Parameters
     ----------
     N : int
         Total number of points to drawn from a 2D random data set
+    dim : int
+        Dimensionality of synthetic data set. (2 or 3)
 
     Returns
     -------
@@ -368,160 +408,15 @@ def get_random_grid_df(N):
         DataFrame of true data drawn from the analytic classification
         and regression functions.
     """
-    stacked_points = np.random.uniform( low=(-3,-3), high=(3,3), size = (N,2) )
-
-    from cris.examples.data.analytic_class_regr import get_output
-    class_result, regr_output = get_output( *stacked_points.T )
-
-    random_df = pd.DataFrame()
-    random_df["input_1"] = stacked_points.T[0]
-    random_df["input_2"] = stacked_points.T[1]
-    random_df["class"] = class_result
-    random_df["output_1"] = regr_output
+    if dim == 2:
+        stacked_points = np.random.uniform( low=(-3,-3), high=(3,3), size = (N,2) )
+        random_df = get_output_2D( *stacked_points.T )
+    elif dim == 3:
+        stacked_points = np.random.uniform( low=(-1,-1,-1), high=(1,1,1), size = (N,3) )
+        random_df = get_output_3D( *stacked_points.T )
     return random_df
 
-
-def get_prediction_diffs( training_df, classifier_name = "linear", regressor_name = "linear",
-                         N = 400, verbose=False):
-    """From a DataFrame of training data, train a classifier and get both
-    the predicitons and actual classification in the classification space
-    where the analytic function is defined. Also calculate the difference
-    between the true regression function and that infered from the trainined
-    regressor.
-
-    Parameters
-    ----------
-    training_df : pandas DataFrame
-        DataFrame of training data, a subset of the true distribution.
-    classifier_name : str
-        Name of the classification algorithm to use.
-    N : int
-        Sets the (NxN) resolution of points used to query the trained classifier.
-    verbose : bool, optional
-        Print more useful information.
-
-    Returns
-    -------
-    pred_class : array
-        1D array of predictions from the trained classifier.
-    true_class_result : array
-        1D array of the true classification for the corresponding points.
-    all_regr_abs_frac_diffs_per_class : list
-        List of arrays that contain absolute value of fractional differences
-        between predicted and analytic regression values.
-
-    Notes
-    -----
-    This function is written specifically for the original snythetic data set.
-    As such, columns and classes are assumed constant and hard coded.
-    """
-    td = TableData( None, ["input_1", "input_2"], ["class", "output_1"],
-                   "class", my_DataFrame=training_df , verbose=False )
-
-    cls_obj = Classifier( td )
-    cls_obj.train_everything( [classifier_name], verbose=False )
-
-    regr_obj = Regressor( td )
-    regr_obj.train_everything( [regressor_name], verbose=False )
-
-    x_min = np.min(training_df["input_1"]); x_max = np.max(training_df["input_1"])
-    y_min = np.min(training_df["input_2"]); y_max = np.max(training_df["input_2"])
-    x_vals = np.linspace( x_min, x_max,N); y_vals = np.linspace(y_min, y_max, N)
-    X, Y = np.meshgrid( x_vals, y_vals )
-    stacked_points = np.concatenate( (np.vstack(X.flatten()), np.vstack(Y.flatten())), axis=1  )
-
-    where_nan, where_not_nan = check_grid_points(stacked_points, cls_obj, classifier_name=classifier_name,
-                                                verbose=verbose)
-
-    pred_class, max_probs, where_not_nan = cls_obj.get_class_predictions( classifier_name,
-                                                                             stacked_points,
-                                                                             return_ids=False)
-
-    if len(where_nan) > 0:
-        # if there are nans, replace the preds with None so they count as missclassifications
-        new_pred_class = np.empty( stacked_points.shape[0], dtype='object' )
-        new_pred_class[where_not_nan] = pred_class
-        new_pred_class[where_nan] = [None]*len(where_nan)
-        pred_class = new_pred_class.copy()
-
-    # Regression
-    all_regr_preds_per_cls = []
-    all_regr_locs_per_cls = []
-    for cls in ["A", "B", "C", "D"]:
-        # We look where the predictions are, not the true class result ....
-        loc_where_cls = np.where( np.array(pred_class) == cls)[0]
-        # Get predictions only for inputs where each class
-        regr_preds = regr_obj.get_predictions( [regressor_name], [cls],
-                                              ["output_1"], stacked_points[loc_where_cls] )
-        regr_key = regr_obj.get_regressor_name_to_key( regressor_name )
-        # Save the array of predictions
-        all_regr_preds_per_cls.append( regr_preds[regr_key][cls]["output_1"] ) # array
-        all_regr_locs_per_cls.append( stacked_points[loc_where_cls] )
-
-
-    from cris.examples.data.analytic_class_regr import get_output
-    true_class_result, true_regr_output = get_output( *stacked_points.T )
-
-    # compare the regression predictions to the true values; calc fractional differences
-    all_regr_abs_frac_diffs_per_class = []
-    for i, cls in enumerate(["A", "B", "C", "D"]):
-        this_cls_true_result, this_cls_true_regr_output = get_output( *all_regr_locs_per_cls[i].T )
-        this_cls_diffs = all_regr_preds_per_cls[i] - this_cls_true_regr_output
-        all_regr_abs_frac_diffs_per_class.append( abs(this_cls_diffs/this_cls_true_regr_output) )
-
-    where_preds_match_true = np.where( pred_class == true_class_result, 1, 0 )
-    accuracy = np.sum(where_preds_match_true)/N**2
-    error_rate = 1 - accuracy
-    if verbose:
-        print( "N training points: {0}, N query points: {1}".format(len(training_df), N*N) )
-        print( "accuracy: {}".format(accuracy) )
-
-    return np.array(pred_class), true_class_result, all_regr_abs_frac_diffs_per_class
-
-def check_grid_points( stacked_points, classifier_obj, classifier_name = "linear", verbose = False):
-    cls_obj = classifier_obj
-    pred_class, max_probs, where_not_nan = \
-                cls_obj.get_class_predictions(classifier_name, stacked_points, return_ids=False)
-
-    where_nan = [i for i in range(len(stacked_points)) if i not in where_not_nan]
-
-    if len(where_nan) + len(where_not_nan) != len(stacked_points):
-        raise Exception("Where nan and where not nan do not add to total points!")
-
-    if len(where_nan) > 0:
-        if verbose:
-            print("\tFound {} nans.".format(len(where_nan)), end="\r")
-    return where_nan, where_not_nan
-
-
-def get_confusion_matrix(preds, actual, all_classes, verbose=False):
-    """Given a list of predicted values and actual values (output of
-    the method get_prediction_diffs), Calculate a confusion matrix.
-
-    Parameters
-    ----------
-    preds : list
-        Predicted values from the classifier.
-    actual : list
-        True values from the underlying distribution.
-    all_classes : list
-        A list of all unique classes to be considered.
-        Should be either np.unique(actual) or a subset thereof.
-    verbose : bool, optional
-        Print our the line by line confusion matrix prefixed with the class.
-    """
-    confusion_matrix = []
-    for pred_class_key in all_classes:
-        loc = np.where( actual == pred_class_key) # where all true class
-        how_many_per_class = np.array([ np.sum(preds[loc]==i) for i in all_classes])
-        # [ how many preds matched true class A, how many preds matched true clas B]
-        how_many_per_class = how_many_per_class/len( loc[0] ) # normalize
-        confusion_matrix.append( how_many_per_class )
-        if verbose:
-            print(pred_class_key, how_many_per_class)
-
-    return np.array(confusion_matrix)
-
+# PERFORMANCE CALCULATIONS
 
 def calc_performance(dfs_per_iter, cls_name="linear", regr_name="rbf", resolution=400, verbose=False):
     """Given a list of pandas DataFrames, iterate over them and
@@ -558,7 +453,7 @@ def calc_performance(dfs_per_iter, cls_name="linear", regr_name="rbf", resolutio
     for j, df in enumerate(dfs_per_iter):
         if verbose: print( "\ndf: {0}".format(j) )
         N = resolution
-        predictions, true_class_result,  abs_regr_frac_diffs_per_cls = \
+        predictions, true_class_result, abs_regr_frac_diffs_per_cls = \
                         get_prediction_diffs( df, classifier_name=cls_name,
                                               regressor_name=regr_name,
                                                 N=N, verbose=verbose )
@@ -567,7 +462,178 @@ def calc_performance(dfs_per_iter, cls_name="linear", regr_name="rbf", resolutio
         conf_matrix_per_iter.append( conf_matrix )
 
         where_preds_match_truth = np.where( predictions == true_class_result, 1, 0 )
-        accuracy = np.sum(where_preds_match_truth)/N**2
+        dim = len( [val for val in df.columns if "input" in val] )
+        accuracy = np.sum(where_preds_match_truth)/N**dim
         acc_per_iter.append( accuracy )
         abs_regr_frac_diffs_per_iter.append( abs_regr_frac_diffs_per_cls )
     return np.array(acc_per_iter), conf_matrix_per_iter, abs_regr_frac_diffs_per_iter
+
+def get_prediction_diffs( training_df, classifier_name = "linear", regressor_name = "linear",
+                         N = 400, verbose=False):
+    """From a DataFrame of training data, train a classifier and get both
+    the predicitons and actual classification in the classification space
+    where the analytic function is defined. Also calculate the difference
+    between the true regression function and that infered from the trainined
+    regressor. Dimensionality is infered from 'training_df'.
+
+    Parameters
+    ----------
+    training_df : pandas DataFrame
+        DataFrame of training data, a subset of the true distribution.
+    classifier_name : str
+        Name of the classification algorithm to use.
+    N : int
+        Sets the (N**dim) resolution of points used to query the trained classifier.
+    verbose : bool, optional
+        Print more useful information.
+
+    Returns
+    -------
+    pred_class : array
+        1D array of predictions from the trained classifier.
+    true_class_result : array
+        1D array of the true classification for the corresponding points.
+    all_regr_abs_frac_diffs_per_class : list
+        List of arrays that contain absolute value of fractional differences
+        between predicted and analytic regression values.
+    """
+    start_time = time.time(); og_start_time = time.time()
+    input_col_names = [val for val in training_df.columns if "input" in val]
+    output_col_names = [val for val in training_df.columns if "output" in val or "class" in val]
+    td = TableData( None, input_col_names, output_col_names,
+                   "class", my_DataFrame=training_df , verbose=False )
+
+    cls_obj = Classifier( td )
+    cls_obj.train_everything( [classifier_name], verbose=False )
+
+    regr_obj = Regressor( td )
+    regr_obj.train_everything( [regressor_name], verbose=False )
+
+    timer=kwargs.get("timer", False)
+    if timer: print( "PSY-CRIS TRAIN: ",time.time()-start_time )
+    start_time = time.time()
+
+    dim = len(input_col_names)
+    axes_values = []
+    for i, name in enumerate(input_col_names):
+        axis_min = np.min(training_df[name])
+        axis_max = np.max(training_df[name])
+        axis_vals = np.linspace( axis_min, axis_max, N )
+        axes_values.append(axis_vals)
+
+    if dim == 2:
+        X, Y = np.meshgrid( *axes_values )
+        holder = ( X.flatten(), Y.flatten() )
+        stacked_points = np.array(holder).T
+    elif dim == 3:
+        X, Y, Z = np.meshgrid( *axes_values )
+        holder = ( X.flatten(), Y.flatten(), Z.flatten() )
+        stacked_points = np.array(holder).T
+
+    if timer: print( "VSTACK: ",time.time()-start_time )
+    start_time = time.time()
+
+    pred_class, max_probs, where_not_nan = cls_obj.get_class_predictions( classifier_name,
+                                                                             stacked_points,
+                                                                             return_ids=False)
+
+    all_possible_ilocs = np.array( range(0,len(stacked_points)) )
+    # s.difference(t)  new set with elements in s but not in t
+    set_where_nan = set( all_possible_ilocs ).difference( where_not_nan )
+    where_nan = np.array( list(set_where_nan) )
+
+    if timer: print( "get_class_predictions: ",time.time()-start_time )
+    start_time = time.time()
+
+    if len(where_nan) > 0:
+        # if there are nans, replace the preds with None so they count as missclassifications
+        new_pred_class = np.empty( stacked_points.shape[0], dtype='object' )
+        new_pred_class[where_not_nan] = pred_class
+        new_pred_class[where_nan] = [None]*len(where_nan)
+        pred_class = new_pred_class.copy()
+
+    if timer: print( "where_nan > 0: ",time.time()-start_time )
+    start_time = time.time()
+
+    # Regression
+    all_regr_preds_per_cls = []
+    all_regr_locs_per_cls = []
+    all_unique_classes = np.unique( training_df["class"] )
+    if verbose:
+        print("CLASSES: {}".format(all_unique_classes))
+    for cls in all_unique_classes:
+        # We look where the predictions are, not the true class result ....
+        loc_where_cls = np.where( np.array(pred_class) == cls)[0]
+        # Get predictions only for inputs where each class
+        regr_preds = regr_obj.get_predictions( [regressor_name], [cls],
+                                              ["output_1"], stacked_points[loc_where_cls] )
+        regr_key = regr_obj.get_regressor_name_to_key( regressor_name )
+        # Save the array of predictions
+        all_regr_preds_per_cls.append( regr_preds[regr_key][cls]["output_1"] ) # array
+        all_regr_locs_per_cls.append( stacked_points[loc_where_cls] )
+
+    if timer: print( "Regression vals: ",time.time()-start_time )
+    start_time = time.time()
+
+    if dim == 2:
+        get_output_func = get_raw_output_2D
+    elif dim==3:
+        get_output_func = get_raw_output_3D
+
+    true_class_result, true_regr_output = get_output_func( *stacked_points.T )
+
+    # compare the regression predictions to the true values; calc fractional differences
+    all_regr_abs_frac_diffs_per_class = []
+    for i, cls in enumerate(all_unique_classes):
+        this_cls_true_result, this_cls_true_regr_output = get_output_func( *all_regr_locs_per_cls[i].T )
+        this_cls_diffs = all_regr_preds_per_cls[i] - this_cls_true_regr_output
+        all_regr_abs_frac_diffs_per_class.append( abs(this_cls_diffs/this_cls_true_regr_output) )
+
+    if timer: print( "regr diffs: ",time.time()-start_time )
+    start_time = time.time()
+
+
+    where_preds_match_true = np.where( pred_class == true_class_result, 1, 0 )
+    accuracy = np.sum(where_preds_match_true)/N**(dim)
+    error_rate = 1 - accuracy
+    if verbose:
+        print( "N training points: {0}, N query points: {1}".format(len(training_df), N**(dim)) )
+        print( "accuracy: {}".format(accuracy) )
+
+    print( "Final stuff END: ", time.time()-start_time )
+    print("TOTAL", time.time() - og_start_time)
+
+    return np.array(pred_class), true_class_result, all_regr_abs_frac_diffs_per_class
+
+
+def get_confusion_matrix(preds, actual, all_classes, verbose=False):
+    """Given a list of predicted values and actual values. Calculate a confusion matrix.
+
+    Parameters
+    ----------
+    preds : list
+        Predicted values from the classifier.
+    actual : list
+        True values from the underlying distribution.
+    all_classes : list
+        A list of all unique classes.
+        Should be either np.unique(actual) or a subset thereof.
+    verbose : bool, optional
+        Print our the line by line confusion matrix prefixed with the class.
+
+    Returns
+    -------
+    confusion_matrix : ndarray
+        Rows and columns of confusion matrix in order and number given in 'all_classes'.
+    """
+    confusion_matrix = []
+    for pred_class_key in all_classes:
+        loc = np.where( actual == pred_class_key) # where all true class
+        how_many_per_class = np.array([ np.sum(preds[loc]==i) for i in all_classes])
+        # [ how many preds matched true class A, how many preds matched true clas B]
+        how_many_per_class = how_many_per_class/len( loc[0] ) # normalize
+        confusion_matrix.append( how_many_per_class )
+        if verbose:
+            print(pred_class_key, how_many_per_class)
+
+    return np.array(confusion_matrix)
